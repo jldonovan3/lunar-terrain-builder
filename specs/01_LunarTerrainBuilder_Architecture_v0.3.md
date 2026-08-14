@@ -44,7 +44,7 @@ LunarTerrainBuilder
     reprojection
     fusion
     validation
-    .ltdb/.ltp writing
+    
 
 LunarTerrainEditor
     Unreal Engine 5.8 editor plugin
