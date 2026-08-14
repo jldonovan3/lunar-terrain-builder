@@ -1,0 +1,4 @@
+interface:
+  display_name: "Planning Clarification"
+  short_description: "Clarify requests into right-sized execution briefs"
+  default_prompt: "Use $planning-clarification to clarify this request into the smallest execution-ready brief."

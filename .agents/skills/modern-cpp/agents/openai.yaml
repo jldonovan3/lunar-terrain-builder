@@ -1,0 +1,4 @@
+interface:
+  display_name: "Modern C++"
+  short_description: "Pragmatic, repo-aware modern C++ guidance"
+  default_prompt: "Use $modern-cpp to make a focused, repo-aware C++ implementation or review decision."

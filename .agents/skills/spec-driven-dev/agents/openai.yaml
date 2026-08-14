@@ -1,0 +1,4 @@
+interface:
+  display_name: "Spec-Driven Development"
+  short_description: "Discuss, write, and implement development specs"
+  default_prompt: "Use $spec-driven-dev to discuss, write, or implement the relevant development spec."

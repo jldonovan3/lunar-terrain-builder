@@ -1,0 +1,4 @@
+interface:
+  display_name: "Plan Progress Tracker"
+  short_description: "Maintain minimal durable plans and handoff state"
+  default_prompt: "Use $plan-progress-tracker to maintain the smallest useful repo-local plan and handoff state."

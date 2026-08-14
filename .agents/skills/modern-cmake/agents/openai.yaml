@@ -1,0 +1,4 @@
+interface:
+  display_name: "Modern CMake"
+  short_description: "Pragmatic CMake code, structure, review, and migration guidance"
+  default_prompt: "Use $modern-cmake to implement or review a focused, repo-aware CMake change."
