@@ -1,0 +1,24 @@
+{
+  "$schema": "https://raw.githubusercontent.com/microsoft/vcpkg-tool/main/docs/vcpkg.schema.json",
+  "name": "lunar-terrain-builder",
+  "version-string": "0.1.0",
+  "builtin-baseline": "9e593bb18ea69cc5095e012465dcd675a822ed0d",
+  "dependencies": [
+    "catch2",
+    "cli11",
+    "fmt",
+    {
+      "name": "gdal",
+      "default-features": false,
+      "features": [
+        "openjpeg"
+      ]
+    },
+    "openssl",
+    "proj",
+    "sqlite3",
+    "tomlplusplus",
+    "zstd"
+  ]
+}
+

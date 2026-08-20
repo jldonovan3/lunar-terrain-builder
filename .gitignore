@@ -1,0 +1,18 @@
+/.vs/
+/.vscode/
+/CMakeUserPresets.json
+/out/
+/build/
+/vcpkg_installed/
+/vcpkg/
+/.ltbuild/
+
+__pycache__/
+*.py[cod]
+*.obj
+*.exe
+
+*.ltdb
+*.ltp
+
+# Keep intentionally versioned format fixtures under tests/golden/ tracked.
