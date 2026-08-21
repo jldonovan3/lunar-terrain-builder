@@ -37,20 +37,32 @@ add_library(LunarTerrain::Core ALIAS lunar_terrain_core)
 target_sources(
     lunar_terrain_core
     PRIVATE
+        src/core/byte_io.cpp
+        src/core/codec.cpp
+        src/core/database.cpp
         src/core/digest.cpp
         src/core/error.cpp
+        src/core/integrity.cpp
+        src/core/qsc_projection.cpp
+        src/core/qsc_topology.cpp
         src/core/tile_key.cpp
     PUBLIC
         FILE_SET public_headers
         TYPE HEADERS
         BASE_DIRS include
         FILES
+            include/lunar/terrain/byte_io.hpp
+            include/lunar/terrain/codec.hpp
             include/lunar/terrain/coordinates.hpp
+            include/lunar/terrain/database.hpp
             include/lunar/terrain/digest.hpp
             include/lunar/terrain/error.hpp
             include/lunar/terrain/format.hpp
             include/lunar/terrain/format_v1.hpp
             include/lunar/terrain/ids.hpp
+            include/lunar/terrain/integrity.hpp
+            include/lunar/terrain/qsc_projection.hpp
+            include/lunar/terrain/qsc_topology.hpp
             include/lunar/terrain/result.hpp
             include/lunar/terrain/tile.hpp
             include/lunar/terrain/tile_key.hpp
@@ -100,8 +112,11 @@ if(LUNAR_TERRAIN_BUILD_TESTING)
 
     add_executable(
         lunar_terrain_core_tests
+        tests/core/byte_codec_tests.cpp
         tests/core/contract_tests.cpp
+        tests/core/database_tests.cpp
         tests/core/format_v1_tests.cpp
+        tests/core/qsc_tests.cpp
         tests/core/tile_key_tests.cpp
     )
     target_compile_features(lunar_terrain_core_tests PRIVATE cxx_std_20)
@@ -110,17 +125,24 @@ if(LUNAR_TERRAIN_BUILD_TESTING)
         lunar_terrain_core_tests
         PRIVATE LUNAR_TERRAIN_GOLDEN_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/golden/format_v1"
     )
-    target_link_libraries(lunar_terrain_core_tests PRIVATE LunarTerrain::Core Catch2::Catch2WithMain)
+    target_link_libraries(
+        lunar_terrain_core_tests
+        PRIVATE LunarTerrain::Core Catch2::Catch2WithMain ${lunar_terrain_zstd_target}
+    )
     lunar_terrain_set_warnings(lunar_terrain_core_tests)
     lunar_terrain_enable_sanitizers(lunar_terrain_core_tests)
     catch_discover_tests(lunar_terrain_core_tests TEST_PREFIX "core.")
 
-    add_executable(lunar_terrain_builder_tests tests/builder/builder_tests.cpp)
+    add_executable(
+        lunar_terrain_builder_tests
+        tests/builder/builder_tests.cpp
+        tests/builder/projection_oracle_tests.cpp
+    )
     target_compile_features(lunar_terrain_builder_tests PRIVATE cxx_std_20)
     set_target_properties(lunar_terrain_builder_tests PROPERTIES CXX_EXTENSIONS OFF)
     target_link_libraries(
         lunar_terrain_builder_tests
-        PRIVATE lunar_terrain_builder_lib Catch2::Catch2WithMain
+        PRIVATE lunar_terrain_builder_lib Catch2::Catch2WithMain PROJ::proj
     )
     lunar_terrain_set_warnings(lunar_terrain_builder_tests)
     lunar_terrain_enable_sanitizers(lunar_terrain_builder_tests)

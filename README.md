@@ -3,13 +3,14 @@
 An offline toolchain for transforming heterogeneous lunar DEM products into a deterministic, fused, provenance-preserving canonical terrain database for ultimate conversion into Unreal Engine 5.8 mesh terrain.
 
 ## The Ultimate Overly-Ambitious Goal
-Streaming (or packaging / compressing) a 1:1 continuous, full-scale 1:1 spherical Moon at scale with a walkable surface, streamed via World Partition in UE
+Streaming (or packaging / compressing) a 1:1 full-scale, continuous, spherical Moon with a walkable surface, streamed via World Partition in UE
 
 ## Overall Goals
 
 - scientific DEM data as authoritative macrogeometry
+- QSC projection
 - fusion of heterogeneous DEM resolutions
-- deterministic procedural enhancement downstream from the scientific base;
+- deterministic procedural enhancement downstream from the scientific base
 - complete offline distribution
 - preservation of DEM provenance, and data attribution
 - Unreal Engine 5.8 mesh terrain as the intended terrain realization layer, rather than scientific storage formats
@@ -31,7 +32,7 @@ Four implementation units:
     Standalone C++20 CLI
     GDAL / PROJ
     DEM ingestion
-    reprojection
+    reprojection to quadrilateralized spherical cube
     fusion
     validation - test OBJ mesh tile
 
