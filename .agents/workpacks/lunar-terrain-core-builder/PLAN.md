@@ -4,10 +4,10 @@ Authoritative scope and milestone definitions: [`plans/01_LunarTerrainCore_Lunar
 
 Architecture: [`specs/01_LunarTerrainBuilder_Architecture_v0.3.md`](../../../specs/01_LunarTerrainBuilder_Architecture_v0.3.md).
 
-Current milestone: M1 — LunarTerrainCore projection and reader foundation. Implementation and Windows/MSVC verification are complete; work is paused before M2 pending the Linux acceptance workflow.
+Current milestone: M2 — Synthetic P0 end-to-end container. Implementation and Windows/MSVC verification are complete; M2 awaits the Linux sanitizer acceptance workflow.
 
-Blockers: The required Linux sanitizer workflow cannot run on this Windows host; WSL and Docker are unavailable. No implementation blocker is known.
+Blockers: The M2 Linux sanitizer workflow cannot run on this Windows host; no implementation blocker is known.
 
-Verification: `cmake --workflow --preset debug` and `cmake --workflow --preset release` pass on Windows/MSVC with the pinned vcpkg baseline; each passes all 30 registered Core, Builder, and CLI tests. Coverage includes TileKey, signed QSC lattice coordinates, six-face PROJ-oracle agreement, topology/reversal/poles/corners, checked little-endian I/O, CRC32C, SHA-256, Delta2D reversal, Zstandard decoding, golden LTDB/LTP reads, ownership, sparse queries, and corruption/version failures. `py -3 tools/generate_format_v1_fixtures.py --check`, `git diff --check`, Core dependency scope, and fast-math audits pass. `linux-asan` remains unexecuted.
+Verification: M1 acceptance is complete, including its Linux sanitizer workflow. For M2, `cmake --workflow --preset debug` and `cmake --workflow --preset release` pass on Windows/MSVC with all 39 registered Core, Builder, and CLI tests. M2 coverage includes typed TOML rejection and identity exclusions, six canonical root-face plans, ELEV/PRVN encoding and Core-reader round trips, all 12 unique face seams, two clean byte-identical builds, failed-publication preservation, and `scan`/`plan`/`build`/`validate`/`inspect` JSON entry points. `py -3 tools/generate_format_v1_fixtures.py --check`, `git diff --check`, frozen-fixture scope, Core dependency scope, and fast-math audits pass. The M2 `linux-asan` workflow remains unexecuted.
 
-Next action: On Linux with GCC or Clang, run `cmake --workflow --preset linux-asan`. If it passes, mark M1 complete and remain paused until M2 is explicitly authorized.
+Next action: On Linux with GCC or Clang, run `cmake --workflow --preset linux-asan`. If it passes, mark M2 complete and remain paused until M3 is explicitly authorized.

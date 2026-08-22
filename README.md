@@ -20,7 +20,7 @@ Streaming (or packaging / compressing) a 1:1 full-scale, continuous, spherical M
 Four implementation units:
 
 
-### `LunarTerrainCore` (In Progress)
+### `LunarTerrainCore` (M1 complete)
     Pure C++ data structures and algorithms
     Tile IDs
     database reader
@@ -35,6 +35,20 @@ Four implementation units:
     reprojection to quadrilateralized spherical cube
     fusion
     validation - test OBJ mesh tile
+
+The M2 synthetic P0 path is available through the committed
+`tests/data/synthetic_p0.toml` configuration:
+
+```text
+lunar-terrain scan tests/data/synthetic_p0.toml --json
+lunar-terrain plan tests/data/synthetic_p0.toml --json
+lunar-terrain build tests/data/synthetic_p0.toml --json
+lunar-terrain validate out/m2-synthetic/MoonSynthetic.ltdb --full --json
+lunar-terrain inspect out/m2-synthetic/MoonSynthetic.ltdb QSC/F0/L00/0000/0000 --json
+```
+
+It publishes six deterministic level-zero QSC face packs and the LTDB manifest.
+Generated `.ltdb`/`.ltp` outputs remain untracked build products.
 
 ### `LunarTerrainEditor`
     Unreal Engine 5.8 editor plugin

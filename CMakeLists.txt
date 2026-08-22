@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.25)
 
 project(
     LunarTerrainBuilder
-    VERSION 0.1.0
+    VERSION 0.2.0
     DESCRIPTION "Deterministic engine-independent lunar terrain database tooling"
     LANGUAGES CXX
 )
@@ -80,6 +80,9 @@ target_sources(
     PRIVATE
         src/builder/builder.cpp
         src/builder/builder.hpp
+        src/builder/configuration.cpp
+        src/builder/configuration.hpp
+        src/builder/container_writer.cpp
 )
 target_include_directories(lunar_terrain_builder_lib PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src")
 target_compile_features(lunar_terrain_builder_lib PUBLIC cxx_std_20)
@@ -93,6 +96,7 @@ target_link_libraries(
         unofficial::sqlite3::sqlite3
         tomlplusplus::tomlplusplus
         fmt::fmt
+        ${lunar_terrain_zstd_target}
 )
 lunar_terrain_set_warnings(lunar_terrain_builder_lib)
 lunar_terrain_enable_sanitizers(lunar_terrain_builder_lib)
@@ -149,5 +153,40 @@ if(LUNAR_TERRAIN_BUILD_TESTING)
     catch_discover_tests(lunar_terrain_builder_tests TEST_PREFIX "builder.")
 
     add_test(NAME cli.version COMMAND lunar-terrain --version)
-    set_tests_properties(cli.version PROPERTIES PASS_REGULAR_EXPRESSION "lunar-terrain 0.1.0")
+    set_tests_properties(cli.version PROPERTIES PASS_REGULAR_EXPRESSION "lunar-terrain 0.2.0")
+
+    set(lunar_terrain_synthetic_config "${CMAKE_CURRENT_SOURCE_DIR}/tests/data/synthetic_p0.toml")
+    set(lunar_terrain_synthetic_database "${CMAKE_CURRENT_SOURCE_DIR}/out/m2-synthetic/MoonSynthetic.ltdb")
+    add_test(NAME cli.scan COMMAND lunar-terrain scan "${lunar_terrain_synthetic_config}" --json)
+    set_tests_properties(cli.scan PROPERTIES PASS_REGULAR_EXPRESSION "\"dataset_id\"")
+    add_test(NAME cli.plan COMMAND lunar-terrain plan "${lunar_terrain_synthetic_config}" --json)
+    set_tests_properties(cli.plan PROPERTIES PASS_REGULAR_EXPRESSION "\"tile_count\":6")
+    add_test(NAME cli.build COMMAND lunar-terrain build "${lunar_terrain_synthetic_config}" --json)
+    set_tests_properties(
+        cli.build
+        PROPERTIES
+            FIXTURES_SETUP m2_cli_database
+            PASS_REGULAR_EXPRESSION "\"tile_count\":6"
+    )
+    add_test(
+        NAME cli.validate
+        COMMAND lunar-terrain validate "${lunar_terrain_synthetic_database}" --full --json
+    )
+    set_tests_properties(
+        cli.validate
+        PROPERTIES
+            FIXTURES_REQUIRED m2_cli_database
+            PASS_REGULAR_EXPRESSION "\"verified_seams\":12"
+    )
+    add_test(
+        NAME cli.inspect
+        COMMAND lunar-terrain inspect "${lunar_terrain_synthetic_database}"
+                QSC/F4/L00/0000/0000 --json
+    )
+    set_tests_properties(
+        cli.inspect
+        PROPERTIES
+            FIXTURES_REQUIRED m2_cli_database
+            PASS_REGULAR_EXPRESSION "\"channel_count\":2"
+    )
 endif()

@@ -1,0 +1,33 @@
+[database]
+name = "MoonSynthetic"
+output_directory = "../../out/m2-synthetic"
+format_major = 1
+format_minor = 0
+
+[datum]
+reference_radius_m = 1737400.0
+elevation_origin_m = -16384.0
+elevation_step_m = 0.5
+
+[projection]
+type = "qsc"
+version = 1
+
+[tiles]
+cells = 256
+apron = 1
+max_level = 0
+
+[packaging]
+target_pack_bytes = 1073741824
+codec = "zstd"
+codec_level = 3
+
+[synthetic]
+stable_key = "synthetic.p0.v1"
+source_uri = "synthetic://analytic-v1"
+amplitude_meters = 2048
+
+[local]
+threads = 1
+cache_directory = "../../out/m2-synthetic-cache"
