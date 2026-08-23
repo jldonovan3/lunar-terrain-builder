@@ -106,5 +106,8 @@ Compiled Mesh Terrain sections
 Unreal cook / IoStore
 ```
 
+## SLDEM2015 Provisioning
+`/provisioning` provides PS and Bash scripts that curl either the single-tile test artifact, or the entire 32-tile dataset, from NASA PDS to a local directory that the pipeline reads through a pinned `SLDEM2015_ROOT` env variable.
+
 ## SLDEM2015 Data Attribution
 Barker, M. K., Mazarico, E., Neumann, G. A., Zuber, M. T., Haruyama, J., Smith, D. E. "A new lunar digital elevation model from the Lunar Orbiter Laser Altimeter and SELENE Terrain Camera," Icarus, Volume 273, p. 346-355. http://dx.doi.org/10.1016/j.icarus.2015.07.039
