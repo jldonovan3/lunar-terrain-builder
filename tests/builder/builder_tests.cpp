@@ -122,6 +122,10 @@ TEST_CASE("typed configuration excludes local execution settings from identity")
     CHECK(first_identity.value().dataset_id == second_identity.value().dataset_id);
     CHECK(first_identity.value().canonical_builder_json.find("output-a") == std::string::npos);
     CHECK(first_identity.value().canonical_builder_json.find("cache-a") == std::string::npos);
+    CHECK(first_identity.value().canonical_semantic_json.find(
+              "lowest_tile_key_patches_v1") != std::string::npos);
+    CHECK(first_identity.value().canonical_semantic_json.find(
+              "quantized_neighbor_or_virtual_v1") != std::string::npos);
     CHECK(first_identity.value().builder_hash != changed_identity.value().builder_hash);
     CHECK(first_identity.value().semantic_hash != changed_identity.value().semantic_hash);
 

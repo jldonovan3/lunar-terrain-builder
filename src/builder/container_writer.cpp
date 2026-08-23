@@ -1,4 +1,5 @@
 #include "builder/builder.hpp"
+#include "builder/tile_staging.hpp"
 
 #include <algorithm>
 #include <array>
@@ -38,7 +39,6 @@
 #include <lunar/terrain/format_v1.hpp>
 #include <lunar/terrain/integrity.hpp>
 #include <lunar/terrain/qsc_projection.hpp>
-#include <lunar/terrain/qsc_topology.hpp>
 
 namespace lunar::terrain::builder {
 namespace {
@@ -50,11 +50,6 @@ constexpr std::uint32_t mandatory_chunk_flags = 0x0003U;
 constexpr std::uint32_t required_channel = 0x0001U;
 constexpr std::uint32_t tile_has_provenance = 0x0001U;
 constexpr std::uint32_t synthetic_resolution_meters = 10'000U;
-constexpr std::size_t core_sample_count =
-    std::size_t{format_v1::core_vertices} * format_v1::core_vertices;
-constexpr std::size_t serialized_sample_count =
-    std::size_t{format_v1::serialized_elevation_samples} *
-    format_v1::serialized_elevation_samples;
 
 struct ChannelArtifact {
     ChannelId id{ChannelId::elevation};
@@ -197,10 +192,6 @@ void append_u64(Bytes& bytes, const std::uint64_t value) {
     write_u64(bytes, offset, value);
 }
 
-void append_f32(Bytes& bytes, const float value) {
-    append_u32(bytes, std::bit_cast<std::uint32_t>(value));
-}
-
 void append_f64(Bytes& bytes, const double value) {
     append_u64(bytes, std::bit_cast<std::uint64_t>(value));
 }
@@ -234,7 +225,8 @@ void append_domain(Bytes& bytes, const std::string_view domain) {
     encoded.push_back('"');
     constexpr std::array<char, 16> hex{
         '0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'a', 'b', 'c', 'd', 'e', 'f'};
-    for (const unsigned char character : value) {
+    for (const char raw_character : value) {
+        const auto character = static_cast<unsigned char>(raw_character);
         switch (character) {
             case '"': encoded += "\\\""; break;
             case '\\': encoded += "\\\\"; break;
@@ -384,29 +376,6 @@ void append_domain(Bytes& bytes, const std::string_view domain) {
     return value;
 }
 
-[[nodiscard]] Result<std::uint16_t> quantize_elevation(const double elevation) {
-    if (!std::isfinite(elevation)) {
-        return failure<std::uint16_t>(
-            ErrorCode::invalid_argument, "terrain sampler produced a non-finite elevation");
-    }
-    const double scaled = (elevation - (-16'384.0)) / 0.5;
-    if (scaled < 0.0 || scaled > 65'535.0) {
-        return failure<std::uint16_t>(
-            ErrorCode::invalid_argument, "terrain elevation is outside the v1 U16 profile");
-    }
-    const double lower = std::floor(scaled);
-    const double fraction = scaled - lower;
-    std::uint32_t rounded = static_cast<std::uint32_t>(lower);
-    if (fraction > 0.5 || (fraction == 0.5 && (rounded & 1U) != 0)) {
-        ++rounded;
-    }
-    if (rounded > std::numeric_limits<std::uint16_t>::max()) {
-        return failure<std::uint16_t>(
-            ErrorCode::invalid_argument, "rounded terrain elevation is outside U16");
-    }
-    return Result<std::uint16_t>::success(static_cast<std::uint16_t>(rounded));
-}
-
 [[nodiscard]] double synthetic_elevation(
     const LunarGeodeticCoordinate coordinate,
     const std::int32_t amplitude_meters) noexcept {
@@ -416,155 +385,6 @@ void append_domain(Bytes& bytes, const std::string_view domain) {
     const double z = std::sin(coordinate.latitude_radians);
     const double normalized = 0.55 * z + 0.25 * x * y + 0.20 * (x * x - y * y);
     return static_cast<double>(amplitude_meters) * normalized;
-}
-
-[[nodiscard]] constexpr std::size_t core_index(
-    const std::uint16_t x,
-    const std::uint16_t y) noexcept {
-    return std::size_t{y} * format_v1::core_vertices + x;
-}
-
-[[nodiscard]] constexpr std::size_t edge_index(
-    const QscEdge edge,
-    const std::uint16_t parameter) noexcept {
-    switch (edge) {
-        case QscEdge::west:
-            return core_index(0, parameter);
-        case QscEdge::east:
-            return core_index(format_v1::core_vertices - 1U, parameter);
-        case QscEdge::south:
-            return core_index(parameter, 0);
-        case QscEdge::north:
-            return core_index(parameter, format_v1::core_vertices - 1U);
-    }
-    return 0;
-}
-
-[[nodiscard]] constexpr std::size_t interior_edge_index(
-    const QscEdge edge,
-    const std::uint16_t parameter) noexcept {
-    switch (edge) {
-        case QscEdge::west:
-            return core_index(1, parameter);
-        case QscEdge::east:
-            return core_index(format_v1::core_vertices - 2U, parameter);
-        case QscEdge::south:
-            return core_index(parameter, 1);
-        case QscEdge::north:
-            return core_index(parameter, format_v1::core_vertices - 2U);
-    }
-    return 0;
-}
-
-[[nodiscard]] Result<std::array<std::vector<std::uint16_t>, 6>> build_quantized_cores(
-    const BuilderConfiguration& configuration) {
-    std::array<std::vector<std::uint16_t>, 6> cores;
-    for (std::uint8_t face = 0; face < cores.size(); ++face) {
-        auto& core = cores[face];
-        core.resize(core_sample_count);
-        for (std::uint16_t y = 0; y < format_v1::core_vertices; ++y) {
-            auto v = QscProjection::LatticeCoordinate(0, y, 0);
-            if (!v) {
-                return Result<std::array<std::vector<std::uint16_t>, 6>>::failure(
-                    std::move(v).error());
-            }
-            for (std::uint16_t x = 0; x < format_v1::core_vertices; ++x) {
-                auto u = QscProjection::LatticeCoordinate(0, x, 0);
-                if (!u) {
-                    return Result<std::array<std::vector<std::uint16_t>, 6>>::failure(
-                        std::move(u).error());
-                }
-                auto coordinate = QscProjection::Inverse(QscCoordinate{
-                    static_cast<QscFace>(face), u.value(), v.value(), 0.0});
-                if (!coordinate) {
-                    return Result<std::array<std::vector<std::uint16_t>, 6>>::failure(
-                        std::move(coordinate).error());
-                }
-                auto quantized = quantize_elevation(synthetic_elevation(
-                    coordinate.value(), configuration.synthetic_amplitude_meters));
-                if (!quantized) {
-                    Error error = std::move(quantized).error();
-                    auto key = LunarTileKey::create(face, 0, 0, 0);
-                    if (key) {
-                        error.with_tile_key(key.value().encoded());
-                    }
-                    return Result<std::array<std::vector<std::uint16_t>, 6>>::failure(
-                        std::move(error));
-                }
-                core[core_index(x, y)] = quantized.value();
-            }
-        }
-    }
-
-    constexpr std::array edges{QscEdge::west, QscEdge::east, QscEdge::south, QscEdge::north};
-    for (std::uint8_t face = 0; face < cores.size(); ++face) {
-        for (const QscEdge edge : edges) {
-            const auto source_face = static_cast<QscFace>(face);
-            if (!qsc_face_owns_edge(source_face, edge)) {
-                continue;
-            }
-            const QscEdgeConnection connection = qsc_edge_connection(source_face, edge);
-            auto& destination = cores[static_cast<std::size_t>(connection.face)];
-            for (std::uint16_t parameter = 0; parameter < format_v1::core_vertices; ++parameter) {
-                const std::uint16_t mapped = connection.reversed
-                    ? static_cast<std::uint16_t>(format_v1::core_vertices - 1U - parameter)
-                    : parameter;
-                destination[edge_index(connection.edge, mapped)] =
-                    cores[face][edge_index(edge, parameter)];
-            }
-        }
-    }
-    return Result<std::array<std::vector<std::uint16_t>, 6>>::success(std::move(cores));
-}
-
-[[nodiscard]] std::vector<std::uint16_t> add_apron(
-    const std::array<std::vector<std::uint16_t>, 6>& cores,
-    const std::uint8_t face) {
-    std::vector<std::uint16_t> samples(serialized_sample_count);
-    constexpr std::uint16_t stored_width = format_v1::serialized_elevation_samples;
-    const auto stored_index = [](const std::uint16_t x, const std::uint16_t y) {
-        return std::size_t{y} * format_v1::serialized_elevation_samples + x;
-    };
-    for (std::uint16_t y = 0; y < format_v1::core_vertices; ++y) {
-        for (std::uint16_t x = 0; x < format_v1::core_vertices; ++x) {
-            samples[stored_index(static_cast<std::uint16_t>(x + 1U), static_cast<std::uint16_t>(y + 1U))] =
-                cores[face][core_index(x, y)];
-        }
-    }
-
-    constexpr std::array edges{QscEdge::west, QscEdge::east, QscEdge::south, QscEdge::north};
-    for (const QscEdge edge : edges) {
-        const QscEdgeConnection connection = qsc_edge_connection(static_cast<QscFace>(face), edge);
-        const auto& neighbor = cores[static_cast<std::size_t>(connection.face)];
-        for (std::uint16_t parameter = 0; parameter < format_v1::core_vertices; ++parameter) {
-            const std::uint16_t mapped = connection.reversed
-                ? static_cast<std::uint16_t>(format_v1::core_vertices - 1U - parameter)
-                : parameter;
-            const std::uint16_t value = neighbor[interior_edge_index(connection.edge, mapped)];
-            switch (edge) {
-                case QscEdge::west:
-                    samples[stored_index(0, static_cast<std::uint16_t>(parameter + 1U))] = value;
-                    break;
-                case QscEdge::east:
-                    samples[stored_index(stored_width - 1U, static_cast<std::uint16_t>(parameter + 1U))] = value;
-                    break;
-                case QscEdge::south:
-                    samples[stored_index(static_cast<std::uint16_t>(parameter + 1U), 0)] = value;
-                    break;
-                case QscEdge::north:
-                    samples[stored_index(static_cast<std::uint16_t>(parameter + 1U), stored_width - 1U)] = value;
-                    break;
-            }
-        }
-    }
-    samples[stored_index(0, 0)] = cores[face][core_index(0, 0)];
-    samples[stored_index(stored_width - 1U, 0)] =
-        cores[face][core_index(format_v1::core_vertices - 1U, 0)];
-    samples[stored_index(0, stored_width - 1U)] =
-        cores[face][core_index(0, format_v1::core_vertices - 1U)];
-    samples[stored_index(stored_width - 1U, stored_width - 1U)] =
-        cores[face][core_index(format_v1::core_vertices - 1U, format_v1::core_vertices - 1U)];
-    return samples;
 }
 
 [[nodiscard]] Bytes u16_samples_to_bytes(const std::vector<std::uint16_t>& samples) {
@@ -712,9 +532,8 @@ void append_domain(Bytes& bytes, const std::string_view domain) {
 [[nodiscard]] Result<EncodedTile> encode_tile(
     const LunarTileKey key,
     const std::vector<std::uint16_t>& samples,
-    const ConfigurationIdentity& identity,
-    const DatasetArtifact& dataset,
-    const std::optional<Sha256Digest>& window_dependency = std::nullopt) {
+    const Sha256Digest& dependency_hash,
+    const DatasetArtifact& dataset) {
     ChannelArtifact elevation;
     elevation.id = ChannelId::elevation;
     elevation.element_type = ElementType::u16;
@@ -752,10 +571,6 @@ void append_domain(Bytes& bytes, const std::string_view domain) {
     channels.push_back(std::move(elevation));
     channels.push_back(std::move(provenance));
 
-    auto dependency_hash = tile_dependency_hash(key, identity, dataset, window_dependency);
-    if (!dependency_hash) {
-        return Result<EncodedTile>::failure(std::move(dependency_hash).error());
-    }
     auto content_hash = tile_content_hash(key, channels);
     if (!content_hash) {
         return Result<EncodedTile>::failure(std::move(content_hash).error());
@@ -785,7 +600,7 @@ void append_domain(Bytes& bytes, const std::string_view domain) {
     write_u32(payload, format_v1::tile_header_offset::channel_directory_offset, format_v1::bytes::tile_header);
     write_u32(payload, format_v1::tile_header_offset::channel_directory_bytes, static_cast<std::uint32_t>(directory_bytes));
     write_u32(payload, format_v1::tile_header_offset::data_region_offset, static_cast<std::uint32_t>(data_offset));
-    write_bytes(payload, format_v1::tile_header_offset::dependency_hash, ByteView{dependency_hash.value().bytes}.first<16>());
+    write_bytes(payload, format_v1::tile_header_offset::dependency_hash, ByteView{dependency_hash.bytes}.first<16>());
     write_bytes(payload, format_v1::tile_header_offset::content_hash, ByteView{content_hash.value().bytes}.first<16>());
 
     std::uint64_t logical_sum = 0;
@@ -832,7 +647,7 @@ void append_domain(Bytes& bytes, const std::string_view domain) {
         std::move(payload),
         *minimum,
         *maximum,
-        dependency_hash.value(),
+        dependency_hash,
         content_hash.value(),
         0,
         static_cast<std::uint32_t>(logical_sum),
@@ -846,18 +661,53 @@ void append_domain(Bytes& bytes, const std::string_view domain) {
     const BuilderConfiguration& configuration,
     const ConfigurationIdentity& identity,
     const DatasetArtifact& dataset) {
-    auto cores = build_quantized_cores(configuration);
-    if (!cores) {
-        return Result<std::vector<EncodedTile>>::failure(std::move(cores).error());
-    }
-    std::vector<EncodedTile> tiles;
-    tiles.reserve(6);
+    const ElevationSampler sampler = [&configuration](const QscCoordinate qsc) {
+        auto coordinate = QscProjection::Inverse(qsc);
+        if (!coordinate) {
+            return Result<double>::failure(std::move(coordinate).error());
+        }
+        return Result<double>::success(synthetic_elevation(
+            coordinate.value(), configuration.synthetic_amplitude_meters));
+    };
+
+    std::vector<StagedElevationTile> staged;
+    staged.reserve(6);
     for (std::uint8_t face = 0; face < 6; ++face) {
         auto key = LunarTileKey::create(face, 0, 0, 0);
         if (!key) {
             return Result<std::vector<EncodedTile>>::failure(std::move(key).error());
         }
-        auto tile = encode_tile(key.value(), add_apron(cores.value(), face), identity, dataset);
+        auto dependency = tile_dependency_hash(key.value(), identity, dataset, std::nullopt);
+        if (!dependency) {
+            return Result<std::vector<EncodedTile>>::failure(std::move(dependency).error());
+        }
+        auto tile = stage_elevation_tile(
+            key.value(),
+            dependency.value(),
+            configuration.cache_directory / "staging",
+            sampler);
+        if (!tile) {
+            return Result<std::vector<EncodedTile>>::failure(std::move(tile).error());
+        }
+        staged.push_back(std::move(tile).value());
+    }
+    auto resolved = resolve_elevation_boundaries(staged);
+    if (!resolved) {
+        return Result<std::vector<EncodedTile>>::failure(std::move(resolved).error());
+    }
+    auto finalized = finalize_elevation_tiles(staged, sampler);
+    if (!finalized) {
+        return Result<std::vector<EncodedTile>>::failure(std::move(finalized).error());
+    }
+
+    std::vector<EncodedTile> tiles;
+    tiles.reserve(finalized.value().size());
+    for (const FinalizedElevationTile& elevation : finalized.value()) {
+        auto tile = encode_tile(
+            elevation.key,
+            elevation.serialized_samples,
+            elevation.dependency_hash,
+            dataset);
         if (!tile) {
             return Result<std::vector<EncodedTile>>::failure(std::move(tile).error());
         }
@@ -1362,28 +1212,6 @@ void remove_if_present(const std::filesystem::path& path) noexcept {
     return Result<void>::success();
 }
 
-[[nodiscard]] Result<double> extended_lattice_coordinate(
-    const std::uint32_t tile_coordinate,
-    const std::uint16_t stored_sample,
-    const std::uint8_t level) {
-    if (stored_sample >= format_v1::serialized_elevation_samples) {
-        return failure<double>(ErrorCode::invalid_argument, "stored raster sample is outside the tile");
-    }
-    const std::int64_t grid_coordinate =
-        static_cast<std::int64_t>(std::uint64_t{tile_coordinate} * format_v1::tile_cells) +
-        static_cast<std::int64_t>(stored_sample) - 1;
-    const std::int64_t denominator = static_cast<std::int64_t>(
-        std::uint64_t{format_v1::tile_cells} << level);
-    const std::int64_t numerator = 2 * grid_coordinate - denominator;
-    const double value = static_cast<double>(numerator) / static_cast<double>(denominator);
-    if (value < -1.0 || value > 1.0) {
-        return failure<double>(
-            ErrorCode::invalid_argument,
-            "the M3 isolated raster tile apron crosses a QSC face boundary; defer it to M4 topology handling");
-    }
-    return Result<double>::success(value);
-}
-
 [[nodiscard]] Result<std::vector<EncodedTile>> build_raster_tiles(
     const BuilderConfiguration& configuration,
     const ConfigurationIdentity& identity,
@@ -1392,44 +1220,49 @@ void remove_if_present(const std::filesystem::path& path) noexcept {
     if (!key) {
         return Result<std::vector<EncodedTile>>::failure(std::move(key).error());
     }
-    std::vector<std::uint16_t> samples(serialized_sample_count);
-    for (std::uint16_t y = 0; y < format_v1::serialized_elevation_samples; ++y) {
-        auto v = extended_lattice_coordinate(key.value().y(), y, key.value().level());
-        if (!v) {
-            return Result<std::vector<EncodedTile>>::failure(std::move(v).error());
-        }
-        for (std::uint16_t x = 0; x < format_v1::serialized_elevation_samples; ++x) {
-            auto u = extended_lattice_coordinate(key.value().x(), x, key.value().level());
-            if (!u) {
-                return Result<std::vector<EncodedTile>>::failure(std::move(u).error());
-            }
-            auto coordinate = QscProjection::Inverse(QscCoordinate{
-                static_cast<QscFace>(key.value().face()), u.value(), v.value(), 0.0});
-            if (!coordinate) {
-                return Result<std::vector<EncodedTile>>::failure(std::move(coordinate).error());
-            }
-            auto sampled = source.Sample(coordinate.value());
-            if (!sampled) {
-                Error error = std::move(sampled).error();
-                error.with_tile_key(key.value().encoded());
-                return Result<std::vector<EncodedTile>>::failure(std::move(error));
-            }
-            auto quantized = quantize_elevation(sampled.value().elevation_meters);
-            if (!quantized) {
-                Error error = std::move(quantized).error();
-                error.with_tile_key(key.value().encoded());
-                return Result<std::vector<EncodedTile>>::failure(std::move(error));
-            }
-            samples[std::size_t{y} * format_v1::serialized_elevation_samples + x] =
-                quantized.value();
-        }
-    }
     auto window_dependency = source.WindowDependency(key.value());
     if (!window_dependency) {
         return Result<std::vector<EncodedTile>>::failure(std::move(window_dependency).error());
     }
+    auto dependency = tile_dependency_hash(
+        key.value(), identity, source.metadata(), window_dependency.value());
+    if (!dependency) {
+        return Result<std::vector<EncodedTile>>::failure(std::move(dependency).error());
+    }
+    const ElevationSampler sampler = [&source](const QscCoordinate qsc) {
+        auto coordinate = QscProjection::Inverse(qsc);
+        if (!coordinate) {
+            return Result<double>::failure(std::move(coordinate).error());
+        }
+        auto sampled = source.Sample(coordinate.value());
+        if (!sampled) {
+            return Result<double>::failure(std::move(sampled).error());
+        }
+        return Result<double>::success(sampled.value().elevation_meters);
+    };
+    auto staged = stage_elevation_tile(
+        key.value(),
+        dependency.value(),
+        configuration.cache_directory / "staging",
+        sampler);
+    if (!staged) {
+        return Result<std::vector<EncodedTile>>::failure(std::move(staged).error());
+    }
+    std::vector<StagedElevationTile> staged_tiles;
+    staged_tiles.push_back(std::move(staged).value());
+    auto resolved = resolve_elevation_boundaries(staged_tiles);
+    if (!resolved) {
+        return Result<std::vector<EncodedTile>>::failure(std::move(resolved).error());
+    }
+    auto finalized = finalize_elevation_tiles(staged_tiles, sampler);
+    if (!finalized) {
+        return Result<std::vector<EncodedTile>>::failure(std::move(finalized).error());
+    }
     auto tile = encode_tile(
-        key.value(), samples, identity, source.metadata(), window_dependency.value());
+        key.value(),
+        finalized.value().front().serialized_samples,
+        dependency.value(),
+        source.metadata());
     if (!tile) {
         return Result<std::vector<EncodedTile>>::failure(std::move(tile).error());
     }

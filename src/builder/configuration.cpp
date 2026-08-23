@@ -218,7 +218,8 @@ void append_domain(ByteVector& bytes, const std::string_view domain) {
     encoded.push_back('"');
     constexpr std::array<char, 16> hex{
         '0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'a', 'b', 'c', 'd', 'e', 'f'};
-    for (const unsigned char character : value) {
+    for (const char raw_character : value) {
+        const auto character = static_cast<unsigned char>(raw_character);
         switch (character) {
             case '"': encoded += "\\\""; break;
             case '\\': encoded += "\\\\"; break;
@@ -269,11 +270,15 @@ void append_domain(ByteVector& bytes, const std::string_view domain) {
 [[nodiscard]] std::string canonical_semantic_json(const BuilderConfiguration& configuration) {
     if (configuration.source_kind == BuilderSourceKind::synthetic) {
         return fmt::format(
-            "{{\"algorithm_version\":1,\"datasets\":[{{\"amplitude_meters\":{},"
+            "{{\"algorithm_version\":1,\"apron\":{{\"algorithm\":"
+            "\"quantized_neighbor_or_virtual_v1\",\"corner_algorithm\":"
+            "\"topology_diagonal_v1\"}},\"datasets\":[{{\"amplitude_meters\":{},"
             "\"source_uri\":{},\"stable_key\":{}}}],\"datum\":{{\"elevation_origin_m\":-16384,"
             "\"elevation_step_m\":0.5,\"reference_radius_m\":1737400}},"
             "\"fusion\":{{\"algorithm\":\"synthetic_analytic_v1\",\"version\":1}},"
             "\"projection\":{{\"id\":1,\"version\":1}},\"quantization\":{{\"id\":1}},"
+            "\"seam\":{{\"algorithm\":\"lowest_tile_key_patches_v1\","
+            "\"quantization_order\":\"after_seam\"}},"
             "\"tiles\":{{\"apron\":1,\"cells\":256,\"maximum_level\":0}}}}",
             configuration.synthetic_amplitude_meters,
             json_string(configuration.synthetic_source_uri),
@@ -286,7 +291,9 @@ void append_domain(ByteVector& bytes, const std::string_view domain) {
     const std::string no_data_policy = raster.no_data_policy == NoDataPolicy::error
         ? "error" : "nearest_valid";
     return fmt::format(
-        "{{\"algorithm_version\":1,\"datasets\":[{{\"artifact_bundle_bytes\":{},"
+        "{{\"algorithm_version\":1,\"apron\":{{\"algorithm\":"
+        "\"quantized_neighbor_or_virtual_v1\",\"corner_algorithm\":"
+        "\"topology_diagonal_v1\"}},\"datasets\":[{{\"artifact_bundle_bytes\":{},"
         "\"artifact_bundle_sha256\":{},\"artifact_members\":[{}],"
         "\"auxiliary_member\":{},\"bounds_degrees\":{{\"east\":{},\"north\":{},"
         "\"south\":{},\"west\":{}}},\"elevation_representation\":{},"
@@ -301,6 +308,8 @@ void append_domain(ByteVector& bytes, const std::string_view domain) {
         "\"elevation_step_m\":0.5,\"reference_radius_m\":1737400}},"
         "\"fusion\":{{\"algorithm\":\"Replace\",\"version\":1}},"
         "\"projection\":{{\"id\":1,\"version\":1}},\"quantization\":{{\"id\":1}},"
+        "\"seam\":{{\"algorithm\":\"lowest_tile_key_patches_v1\","
+        "\"quantization_order\":\"after_seam\"}},"
         "\"tiles\":{{\"apron\":1,\"cells\":256,\"maximum_level\":{}}}}}",
         optional_u64_json(raster.expected_bundle_bytes),
         optional_digest_json(raster.expected_bundle_sha256),

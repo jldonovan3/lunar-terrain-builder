@@ -85,6 +85,8 @@ target_sources(
         src/builder/container_writer.cpp
         src/builder/raster_source.cpp
         src/builder/raster_source.hpp
+        src/builder/tile_staging.cpp
+        src/builder/tile_staging.hpp
 )
 target_include_directories(lunar_terrain_builder_lib PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src")
 target_compile_features(lunar_terrain_builder_lib PUBLIC cxx_std_20)
@@ -145,6 +147,7 @@ if(LUNAR_TERRAIN_BUILD_TESTING)
         tests/builder/builder_tests.cpp
         tests/builder/projection_oracle_tests.cpp
         tests/builder/raster_source_tests.cpp
+        tests/builder/tile_staging_tests.cpp
     )
     target_compile_features(lunar_terrain_builder_tests PRIVATE cxx_std_20)
     set_target_properties(lunar_terrain_builder_tests PROPERTIES CXX_EXTENSIONS OFF)
