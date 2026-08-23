@@ -20,7 +20,7 @@ Streaming (or packaging / compressing) a 1:1 full-scale, continuous, spherical M
 Four implementation units:
 
 
-### `LunarTerrainCore` (M1 complete)
+### `LunarTerrainCore` (M2 complete)
     Pure C++ data structures and algorithms
     Tile IDs
     database reader
@@ -28,7 +28,7 @@ Four implementation units:
     coordinate primitives
     no Unreal dependency
 
-### `LunarTerrainBuilder`
+### `LunarTerrainBuilder` (M2 complete)
     Standalone C++20 CLI
     GDAL / PROJ
     DEM ingestion
