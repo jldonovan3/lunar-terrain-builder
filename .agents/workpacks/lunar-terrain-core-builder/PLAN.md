@@ -4,10 +4,10 @@ Authoritative scope and milestone definitions: [`plans/01_LunarTerrainCore_Lunar
 
 Architecture: [`specs/01_LunarTerrainBuilder_Architecture_v0.3.md`](../../../specs/01_LunarTerrainBuilder_Architecture_v0.3.md).
 
-Current milestone: M2 — Synthetic P0 end-to-end container. Implementation and Windows/MSVC verification are complete; M2 awaits the Linux sanitizer acceptance workflow.
+Current milestone: M3 — SLDEM2015 P1 ingestion is complete. Development is paused before M4.
 
-Blockers: The M2 Linux sanitizer workflow cannot run on this Windows host; no implementation blocker is known.
+Blockers: None known. The pinned three-member SLDEM2015 subset is provisioned outside the repository and matches the locked byte counts and SHA-256 values in [`plans/02_SLDEM2015_Pre-M3_Provisioning_Workflow.md`](../../../plans/02_SLDEM2015_Pre-M3_Provisioning_Workflow.md).
 
-Verification: M1 acceptance is complete, including its Linux sanitizer workflow. For M2, `cmake --workflow --preset debug` and `cmake --workflow --preset release` pass on Windows/MSVC with all 39 registered Core, Builder, and CLI tests. M2 coverage includes typed TOML rejection and identity exclusions, six canonical root-face plans, ELEV/PRVN encoding and Core-reader round trips, all 12 unique face seams, two clean byte-identical builds, failed-publication preservation, and `scan`/`plan`/`build`/`validate`/`inspect` JSON entry points. `py -3 tools/generate_format_v1_fixtures.py --check`, `git diff --check`, frozen-fixture scope, Core dependency scope, and fast-math audits pass. The M2 `linux-asan` workflow remains unexecuted.
+Verification: M2 acceptance is complete, including its Linux ASan/UBSan workflow. M3 passed the Windows/MSVC debug and release workflows, generated-raster catalog/build/Core-roundtrip tests, explicit datum and no-data tests, and the opt-in pinned-SLDEM2015 acceptance workflow. The real-data acceptance rechecked all three member hashes and the canonical ordered bundle hash, measured the locked source sample, reproduced the selected QSC tile byte-for-byte across two builds, and reconstructed it through Core within the configured quantization bound. The format-fixture check, frozen-fixture scope, Core dependency scope, deterministic-floating-point scope, and machine-local-path audit passed.
 
-Next action: On Linux with GCC or Clang, run `cmake --workflow --preset linux-asan`. If it passes, mark M2 complete and remain paused until M3 is explicitly authorized.
+Next action: Pause. Begin M4 multi-source fusion, hierarchy, seam, and apron work only after explicit authorization.

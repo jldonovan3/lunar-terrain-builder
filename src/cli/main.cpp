@@ -57,19 +57,19 @@ int main(int argc, char** argv) {
 
     std::filesystem::path scan_path;
     bool scan_json = false;
-    CLI::App* scan = app.add_subcommand("scan", "Parse and validate a synthetic builder configuration");
+    CLI::App* scan = app.add_subcommand("scan", "Catalog and validate a builder configuration and source");
     scan->add_option("configuration", scan_path, "TOML configuration path")->required();
     scan->add_flag("--json", scan_json, "Emit machine-readable JSON");
 
     std::filesystem::path plan_path;
     bool plan_json = false;
-    CLI::App* plan = app.add_subcommand("plan", "Plan the synthetic six-face P0 build");
+    CLI::App* plan = app.add_subcommand("plan", "Plan the configured prototype build");
     plan->add_option("configuration", plan_path, "TOML configuration path")->required();
     plan->add_flag("--json", plan_json, "Emit machine-readable JSON");
 
     std::filesystem::path build_path;
     bool build_json = false;
-    CLI::App* build = app.add_subcommand("build", "Build and transactionally publish synthetic LTDB/LTP files");
+    CLI::App* build = app.add_subcommand("build", "Build and transactionally publish LTDB/LTP files");
     build->add_option("configuration", build_path, "TOML configuration path")->required();
     build->add_flag("--json", build_json, "Emit machine-readable JSON");
 
@@ -110,7 +110,7 @@ int main(int argc, char** argv) {
         if (!configuration) {
             return report_error(configuration.error(), plan_json);
         }
-        auto report = plan_synthetic(configuration.value());
+        auto report = plan_configuration(configuration.value());
         if (!report) {
             return report_error(report.error(), plan_json);
         }
@@ -122,7 +122,7 @@ int main(int argc, char** argv) {
         if (!configuration) {
             return report_error(configuration.error(), build_json);
         }
-        auto report = build_synthetic(configuration.value());
+        auto report = build_configuration(configuration.value());
         if (!report) {
             return report_error(report.error(), build_json);
         }

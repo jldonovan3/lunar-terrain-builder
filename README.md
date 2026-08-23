@@ -28,13 +28,15 @@ Four implementation units:
     coordinate primitives
     no Unreal dependency
 
-### `LunarTerrainBuilder` (M2 complete)
+### `LunarTerrainBuilder` (M3 complete)
     Standalone C++20 CLI
     GDAL / PROJ
     DEM ingestion
     reprojection to quadrilateralized spherical cube
     fusion
     validation - test OBJ mesh tile
+
+#### `LunarTerrainBuilder` source data pathing
 
 The M2 synthetic P0 path is available through the committed
 `tests/data/synthetic_p0.toml` configuration:
@@ -49,6 +51,24 @@ lunar-terrain inspect out/m2-synthetic/MoonSynthetic.ltdb QSC/F0/L00/0000/0000 -
 
 It publishes six deterministic level-zero QSC face packs and the LTDB manifest.
 Generated `.ltdb`/`.ltp` outputs remain untracked build products.
+
+The M3 SLDEM2015 P1 path is configured by
+`tests/data/sldem2015_p1.toml`. It catalogs and verifies the pinned raster
+artifact bundle, applies explicit datum and no-data rules, selects a fully
+covered QSC tile, and publishes a deterministic v1 database through the same
+Core reader path. Set `SLDEM2015_ROOT` to the provisioned artifact root, then
+run:
+
+```text
+cmake --workflow --preset sldem2015-acceptance
+lunar-terrain scan tests/data/sldem2015_p1.toml --json
+lunar-terrain plan tests/data/sldem2015_p1.toml --json
+lunar-terrain build tests/data/sldem2015_p1.toml --json
+```
+
+Without `SLDEM2015_ROOT`, the external-data acceptance test is reported as
+skipped by the normal debug and release workflows. M4 multi-source fusion and
+seam work has not started.
 
 ### `LunarTerrainEditor`
     Unreal Engine 5.8 editor plugin

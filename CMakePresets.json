@@ -88,6 +88,19 @@
       "output": {
         "outputOnFailure": true
       }
+    },
+    {
+      "name": "sldem2015-acceptance",
+      "configurePreset": "debug",
+      "configuration": "Debug",
+      "filter": {
+        "include": {
+          "label": "sldem2015"
+        }
+      },
+      "output": {
+        "outputOnFailure": true
+      }
     }
   ],
   "workflowPresets": [
@@ -114,7 +127,14 @@
         { "type": "build", "name": "linux-asan" },
         { "type": "test", "name": "linux-asan" }
       ]
+    },
+    {
+      "name": "sldem2015-acceptance",
+      "steps": [
+        { "type": "configure", "name": "debug" },
+        { "type": "build", "name": "debug" },
+        { "type": "test", "name": "sldem2015-acceptance" }
+      ]
     }
   ]
 }
-

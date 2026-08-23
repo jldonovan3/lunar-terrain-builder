@@ -79,6 +79,7 @@ struct EncodedTile {
     Sha256Digest content_hash;
     std::uint32_t payload_crc{};
     std::uint32_t logical_channel_bytes{};
+    std::uint32_t effective_resolution_millimeters{};
 };
 
 struct PackArtifact {
@@ -91,17 +92,6 @@ struct PackArtifact {
     std::uint64_t payload_offset{};
     std::uint32_t payload_bytes{};
     std::size_t tile_index{};
-};
-
-struct SyntheticDataset {
-    DatasetId id;
-    std::array<std::string, 8> strings;
-    std::string artifact_name;
-    Bytes artifact_bytes;
-    Sha256Digest artifact_hash;
-    Sha256Digest artifact_bundle_hash;
-    std::string metadata_json;
-    Sha256Digest registry_hash;
 };
 
 struct ChunkArtifact {
@@ -277,11 +267,11 @@ void append_domain(Bytes& bytes, const std::string_view domain) {
         });
 }
 
-[[nodiscard]] Result<SyntheticDataset> make_dataset(
+[[nodiscard]] Result<DatasetArtifact> make_synthetic_dataset(
     const BuilderConfiguration& configuration,
     const ConfigurationIdentity& identity) {
-    SyntheticDataset dataset;
-    dataset.id = identity.synthetic_dataset_id;
+    DatasetArtifact dataset;
+    dataset.id = identity.dataset_id;
     dataset.strings = {
         "Synthetic P0 Analytic Terrain",
         "LunarTerrainBuilder",
@@ -292,40 +282,51 @@ void append_domain(Bytes& bytes, const std::string_view domain) {
         "LunarQSC_v1",
         "Generated test data",
     };
-    dataset.artifact_name = "synthetic/p0-v1.json";
+    dataset.nominal_resolution_meters = synthetic_resolution_meters;
+    dataset.horizontal_accuracy_meters = std::bit_cast<double>(0x7FF8000000000000ULL);
+    dataset.vertical_accuracy_meters = std::bit_cast<double>(0x7FF8000000000000ULL);
+    dataset.source_no_data = std::bit_cast<double>(0x7FF8000000000000ULL);
+    dataset.datum_version = "synthetic_datum_v1";
+    dataset.sampling_algorithm = "synthetic_analytic_v1";
+    const std::string artifact_name = "synthetic/p0-v1.json";
     const std::string descriptor = fmt::format(
         "{{\"amplitude_meters\":{},\"formula\":\"analytic_unit_vector_v1\",\"version\":1}}",
         configuration.synthetic_amplitude_meters);
-    dataset.artifact_bytes.assign(
+    Bytes artifact_bytes{
         std::as_bytes(std::span{descriptor}).begin(),
-        std::as_bytes(std::span{descriptor}).end());
-    auto artifact_hash = sha256(dataset.artifact_bytes);
+        std::as_bytes(std::span{descriptor}).end()};
+    auto artifact_hash = sha256(artifact_bytes);
     if (!artifact_hash) {
-        return Result<SyntheticDataset>::failure(std::move(artifact_hash).error());
+        return Result<DatasetArtifact>::failure(std::move(artifact_hash).error());
     }
-    dataset.artifact_hash = artifact_hash.value();
+    dataset.artifact_members.push_back(ArtifactMember{
+        artifact_name,
+        artifact_bytes.size(),
+        artifact_hash.value(),
+    });
 
     Bytes bundle_input;
     append_domain(bundle_input, "LTDB_ARTIFACT_BUNDLE_V1");
     append_u32(bundle_input, 1);
-    append_u32(bundle_input, static_cast<std::uint32_t>(dataset.artifact_name.size()));
-    append_text(bundle_input, dataset.artifact_name);
-    append_u64(bundle_input, dataset.artifact_bytes.size());
-    append_bytes(bundle_input, dataset.artifact_hash.bytes);
+    append_u32(bundle_input, static_cast<std::uint32_t>(artifact_name.size()));
+    append_text(bundle_input, artifact_name);
+    append_u64(bundle_input, artifact_bytes.size());
+    append_bytes(bundle_input, artifact_hash.value().bytes);
     auto bundle_hash = sha256(bundle_input);
     if (!bundle_hash) {
-        return Result<SyntheticDataset>::failure(std::move(bundle_hash).error());
+        return Result<DatasetArtifact>::failure(std::move(bundle_hash).error());
     }
     dataset.artifact_bundle_hash = bundle_hash.value();
+    dataset.artifact_bundle_bytes = artifact_bytes.size();
 
     dataset.metadata_json = fmt::format(
         "{{\"artifact_members\":[{{\"bytes\":{},\"name\":{},\"sha256\":{}}}],"
         "\"datum\":{{\"reference_radius_m\":1737400}},"
         "\"elevation_representation\":\"elevation_meters\",\"metadata_overrides\":{{}},"
         "\"no_data\":\"none\",\"stable_key\":{}}}",
-        dataset.artifact_bytes.size(),
-        json_string(dataset.artifact_name),
-        json_string(dataset.artifact_hash.to_hex()),
+        artifact_bytes.size(),
+        json_string(artifact_name),
+        json_string(artifact_hash.value().to_hex()),
         json_string(configuration.synthetic_stable_key));
 
     Bytes registry_input;
@@ -337,21 +338,21 @@ void append_domain(Bytes& bytes, const std::string_view domain) {
         append_u64(registry_input, text.size());
         append_text(registry_input, text);
     }
-    append_f64(registry_input, static_cast<double>(synthetic_resolution_meters));
+    append_f64(registry_input, dataset.nominal_resolution_meters);
     append_u64(registry_input, 0x7FF8000000000000ULL);
     append_u64(registry_input, 0x7FF8000000000000ULL);
     append_u64(registry_input, 0x7FF8000000000000ULL);
-    append_u64(registry_input, dataset.artifact_bytes.size());
+    append_u64(registry_input, dataset.artifact_bundle_bytes);
     append_bytes(registry_input, dataset.artifact_bundle_hash.bytes);
     append_u64(registry_input, dataset.metadata_json.size());
     append_text(registry_input, dataset.metadata_json);
     append_u32(registry_input, 0);
     auto registry_hash = sha256(registry_input);
     if (!registry_hash) {
-        return Result<SyntheticDataset>::failure(std::move(registry_hash).error());
+        return Result<DatasetArtifact>::failure(std::move(registry_hash).error());
     }
     dataset.registry_hash = registry_hash.value();
-    return Result<SyntheticDataset>::success(std::move(dataset));
+    return Result<DatasetArtifact>::success(std::move(dataset));
 }
 
 [[nodiscard]] Result<DatabaseId> make_database_id(
@@ -386,12 +387,12 @@ void append_domain(Bytes& bytes, const std::string_view domain) {
 [[nodiscard]] Result<std::uint16_t> quantize_elevation(const double elevation) {
     if (!std::isfinite(elevation)) {
         return failure<std::uint16_t>(
-            ErrorCode::invalid_argument, "synthetic sampler produced a non-finite elevation");
+            ErrorCode::invalid_argument, "terrain sampler produced a non-finite elevation");
     }
     const double scaled = (elevation - (-16'384.0)) / 0.5;
     if (scaled < 0.0 || scaled > 65'535.0) {
         return failure<std::uint16_t>(
-            ErrorCode::invalid_argument, "synthetic elevation is outside the v1 U16 profile");
+            ErrorCode::invalid_argument, "terrain elevation is outside the v1 U16 profile");
     }
     const double lower = std::floor(scaled);
     const double fraction = scaled - lower;
@@ -401,7 +402,7 @@ void append_domain(Bytes& bytes, const std::string_view domain) {
     }
     if (rounded > std::numeric_limits<std::uint16_t>::max()) {
         return failure<std::uint16_t>(
-            ErrorCode::invalid_argument, "rounded synthetic elevation is outside U16");
+            ErrorCode::invalid_argument, "rounded terrain elevation is outside U16");
     }
     return Result<std::uint16_t>::success(static_cast<std::uint16_t>(rounded));
 }
@@ -639,7 +640,9 @@ void append_domain(Bytes& bytes, const std::string_view domain) {
     return Result<Bytes>::success(std::move(stored));
 }
 
-[[nodiscard]] Bytes provenance_bytes(const DatasetId dataset_id) {
+[[nodiscard]] Bytes provenance_bytes(
+    const DatasetId dataset_id,
+    const double native_resolution_meters) {
     Bytes bytes(format_v1::bytes::provenance_header + format_v1::bytes::provenance_palette_entry);
     write_u16(bytes, format_v1::provenance_header_offset::version, 1);
     write_u16(bytes, format_v1::provenance_header_offset::palette_count, 1);
@@ -648,28 +651,35 @@ void append_domain(Bytes& bytes, const std::string_view domain) {
     write_f32(
         bytes,
         format_v1::bytes::provenance_header + 12U,
-        static_cast<float>(synthetic_resolution_meters));
+        static_cast<float>(native_resolution_meters));
     return bytes;
 }
 
 [[nodiscard]] Result<Sha256Digest> tile_dependency_hash(
     const LunarTileKey key,
     const ConfigurationIdentity& identity,
-    const SyntheticDataset& dataset) {
+    const DatasetArtifact& dataset,
+    const std::optional<Sha256Digest>& window_dependency) {
     const std::string semantic_hex = identity.semantic_hash.to_hex();
+    const std::string windows = window_dependency
+        ? fmt::format("[{{\"dependency_sha256\":\"{}\"}}]", window_dependency->to_hex())
+        : "[]";
     const std::string jcs = fmt::format(
-        "{{\"builder_algorithm_version\":1,\"datum_version\":\"synthetic_datum_v1\","
-        "\"fusion\":{{\"algorithm\":\"synthetic_analytic_v1\",\"configuration_sha256\":\"{}\"}},"
+        "{{\"builder_algorithm_version\":1,\"datum_version\":{},"
+        "\"fusion\":{{\"algorithm\":{},\"configuration_sha256\":\"{}\"}},"
         "\"projection\":{{\"id\":1,\"implementation_version\":1}},"
         "\"quantization\":{{\"configuration_sha256\":\"{}\",\"id\":1}},"
         "\"semantic_configuration_sha256\":\"{}\",\"sources\":[{{"
-        "\"artifact_bundle_sha256\":\"{}\",\"dataset_id\":{},\"windows\":[]}}],"
+        "\"artifact_bundle_sha256\":\"{}\",\"dataset_id\":{},\"windows\":{}}}],"
         "\"tile_key\":\"{:016x}\",\"tile_schema_version\":1}}",
+        json_string(dataset.datum_version),
+        json_string(dataset.sampling_algorithm),
         semantic_hex,
         semantic_hex,
         semantic_hex,
         dataset.artifact_bundle_hash.to_hex(),
         dataset.id.value,
+        windows,
         key.encoded());
     return framed_text_hash("LTDB_TILE_DEP_V1", jcs);
 }
@@ -703,7 +713,8 @@ void append_domain(Bytes& bytes, const std::string_view domain) {
     const LunarTileKey key,
     const std::vector<std::uint16_t>& samples,
     const ConfigurationIdentity& identity,
-    const SyntheticDataset& dataset) {
+    const DatasetArtifact& dataset,
+    const std::optional<Sha256Digest>& window_dependency = std::nullopt) {
     ChannelArtifact elevation;
     elevation.id = ChannelId::elevation;
     elevation.element_type = ElementType::u16;
@@ -727,7 +738,7 @@ void append_domain(Bytes& bytes, const std::string_view domain) {
     provenance.element_type = ElementType::opaque;
     provenance.predictor = Predictor::none;
     provenance.flags = required_channel;
-    provenance.decoded = provenance_bytes(dataset.id);
+    provenance.decoded = provenance_bytes(dataset.id, dataset.nominal_resolution_meters);
     provenance.logical = provenance.decoded;
     auto provenance_stored = compress_zstandard(provenance.logical);
     if (!provenance_stored) {
@@ -741,7 +752,7 @@ void append_domain(Bytes& bytes, const std::string_view domain) {
     channels.push_back(std::move(elevation));
     channels.push_back(std::move(provenance));
 
-    auto dependency_hash = tile_dependency_hash(key, identity, dataset);
+    auto dependency_hash = tile_dependency_hash(key, identity, dataset, window_dependency);
     if (!dependency_hash) {
         return Result<EncodedTile>::failure(std::move(dependency_hash).error());
     }
@@ -764,7 +775,8 @@ void append_domain(Bytes& bytes, const std::string_view domain) {
     write_u16(payload, format_v1::tile_header_offset::core_vertices, format_v1::core_vertices);
     write_u8(payload, format_v1::tile_header_offset::apron, format_v1::apron_samples);
     write_u8(payload, format_v1::tile_header_offset::encoding_profile, static_cast<std::uint8_t>(EncodingProfile::global_u16));
-    write_f32(payload, format_v1::tile_header_offset::effective_resolution, static_cast<float>(synthetic_resolution_meters));
+    write_f32(payload, format_v1::tile_header_offset::effective_resolution,
+              static_cast<float>(dataset.nominal_resolution_meters));
     write_f32(payload, format_v1::tile_header_offset::geometric_error, 0.0F);
     write_f32(payload, format_v1::tile_header_offset::minimum_elevation, -16'384.0F + static_cast<float>(*minimum) * 0.5F);
     write_f32(payload, format_v1::tile_header_offset::maximum_elevation, -16'384.0F + static_cast<float>(*maximum) * 0.5F);
@@ -824,6 +836,7 @@ void append_domain(Bytes& bytes, const std::string_view domain) {
         content_hash.value(),
         0,
         static_cast<std::uint32_t>(logical_sum),
+        static_cast<std::uint32_t>(std::llround(dataset.nominal_resolution_meters * 1'000.0)),
     };
     encoded.payload_crc = crc32c(encoded.payload);
     return Result<EncodedTile>::success(std::move(encoded));
@@ -832,7 +845,7 @@ void append_domain(Bytes& bytes, const std::string_view domain) {
 [[nodiscard]] Result<std::vector<EncodedTile>> build_tiles(
     const BuilderConfiguration& configuration,
     const ConfigurationIdentity& identity,
-    const SyntheticDataset& dataset) {
+    const DatasetArtifact& dataset) {
     auto cores = build_quantized_cores(configuration);
     if (!cores) {
         return Result<std::vector<EncodedTile>>::failure(std::move(cores).error());
@@ -880,10 +893,12 @@ void append_domain(Bytes& bytes, const std::string_view domain) {
         }
         write_bytes(bytes, format_v1::pack_header_offset::sha256_prefix, ByteView{pack_hash.value().bytes}.first<16>());
         const std::filesystem::path relative_path = fmt::format(
-            "Packs/{}_{}_F{}_L00_P0000.ltp",
+            "Packs/{}_{}_F{}_L{:02}_P{:04}.ltp",
             configuration.database_name,
             id_hex,
-            tile.key.face());
+            tile.key.face(),
+            tile.key.level(),
+            index);
         packs.push_back(PackArtifact{
             PackId{static_cast<std::uint32_t>(index)},
             relative_path,
@@ -905,7 +920,7 @@ struct StringTable {
 };
 
 [[nodiscard]] Result<StringTable> make_string_table(
-    const SyntheticDataset& dataset,
+    const DatasetArtifact& dataset,
     const std::vector<PackArtifact>& packs) {
     std::vector<std::string> values;
     for (const std::string& value : dataset.strings) {
@@ -936,7 +951,7 @@ struct StringTable {
 }
 
 [[nodiscard]] Bytes make_dataset_chunk(
-    const SyntheticDataset& dataset,
+    const DatasetArtifact& dataset,
     const StringTable& strings) {
     Bytes bytes(format_v1::bytes::dataset_record);
     write_u32(bytes, format_v1::dataset_record_offset::dataset_id, dataset.id.value);
@@ -946,11 +961,12 @@ struct StringTable {
             format_v1::dataset_record_offset::first_string_id + index * 4U,
             strings.offsets.at(dataset.strings[index]));
     }
-    write_f64(bytes, format_v1::dataset_record_offset::nominal_resolution, static_cast<double>(synthetic_resolution_meters));
-    write_u64(bytes, format_v1::dataset_record_offset::horizontal_accuracy, 0x7FF8000000000000ULL);
-    write_u64(bytes, format_v1::dataset_record_offset::vertical_accuracy, 0x7FF8000000000000ULL);
-    write_u64(bytes, format_v1::dataset_record_offset::source_no_data, 0x7FF8000000000000ULL);
-    write_u64(bytes, format_v1::dataset_record_offset::artifact_bundle_bytes, dataset.artifact_bytes.size());
+    write_u32(bytes, format_v1::dataset_record_offset::flags, dataset.flags);
+    write_f64(bytes, format_v1::dataset_record_offset::nominal_resolution, dataset.nominal_resolution_meters);
+    write_f64(bytes, format_v1::dataset_record_offset::horizontal_accuracy, dataset.horizontal_accuracy_meters);
+    write_f64(bytes, format_v1::dataset_record_offset::vertical_accuracy, dataset.vertical_accuracy_meters);
+    write_f64(bytes, format_v1::dataset_record_offset::source_no_data, dataset.source_no_data);
+    write_u64(bytes, format_v1::dataset_record_offset::artifact_bundle_bytes, dataset.artifact_bundle_bytes);
     write_bytes(bytes, format_v1::dataset_record_offset::artifact_bundle_hash, dataset.artifact_bundle_hash.bytes);
     write_u32(bytes, format_v1::dataset_record_offset::meta_offset, 0);
     write_u32(bytes, format_v1::dataset_record_offset::meta_bytes, static_cast<std::uint32_t>(dataset.metadata_json.size()));
@@ -995,7 +1011,8 @@ struct StringTable {
         write_u16(bytes, offset + format_v1::tile_index_offset::minimum_elevation, tile.minimum_code);
         write_u16(bytes, offset + format_v1::tile_index_offset::maximum_elevation, tile.maximum_code);
         write_u32(bytes, offset + format_v1::tile_index_offset::primary_dataset, dataset_id.value);
-        write_u32(bytes, offset + format_v1::tile_index_offset::effective_resolution, synthetic_resolution_meters * 1'000U);
+        write_u32(bytes, offset + format_v1::tile_index_offset::effective_resolution,
+                  tile.effective_resolution_millimeters);
         write_u32(bytes, offset + format_v1::tile_index_offset::geometric_error, 0);
         write_u8(bytes, offset + format_v1::tile_index_offset::channel_count, 2);
         write_u32(bytes, offset + format_v1::tile_index_offset::payload_crc32c, tile.payload_crc);
@@ -1032,7 +1049,7 @@ struct StringTable {
 
 [[nodiscard]] Result<std::pair<Bytes, Sha256Digest>> make_database_file(
     const ConfigurationIdentity& identity,
-    const SyntheticDataset& dataset,
+    const DatasetArtifact& dataset,
     const DatabaseId& database_id,
     const std::vector<EncodedTile>& tiles,
     const std::vector<PackArtifact>& packs) {
@@ -1081,7 +1098,10 @@ struct StringTable {
     write_u16(file, format_v1::ltdb_header_offset::tile_cells, format_v1::tile_cells);
     write_u16(file, format_v1::ltdb_header_offset::core_vertices, format_v1::core_vertices);
     write_u8(file, format_v1::ltdb_header_offset::apron, format_v1::apron_samples);
-    write_u8(file, format_v1::ltdb_header_offset::maximum_level, 0);
+    const auto highest_level = std::ranges::max_element(
+        tiles, {}, [](const EncodedTile& tile) { return tile.key.level(); });
+    const std::uint8_t maximum_level = highest_level->key.level();
+    write_u8(file, format_v1::ltdb_header_offset::maximum_level, maximum_level);
     write_u8(file, format_v1::ltdb_header_offset::projection, static_cast<std::uint8_t>(ProjectionId::lunar_qsc_v1));
     write_u8(file, format_v1::ltdb_header_offset::quantization, static_cast<std::uint8_t>(QuantizationId::global_u16_0p5m));
     write_u64(file, format_v1::ltdb_header_offset::tile_count, tiles.size());
@@ -1342,6 +1362,120 @@ void remove_if_present(const std::filesystem::path& path) noexcept {
     return Result<void>::success();
 }
 
+[[nodiscard]] Result<double> extended_lattice_coordinate(
+    const std::uint32_t tile_coordinate,
+    const std::uint16_t stored_sample,
+    const std::uint8_t level) {
+    if (stored_sample >= format_v1::serialized_elevation_samples) {
+        return failure<double>(ErrorCode::invalid_argument, "stored raster sample is outside the tile");
+    }
+    const std::int64_t grid_coordinate =
+        static_cast<std::int64_t>(std::uint64_t{tile_coordinate} * format_v1::tile_cells) +
+        static_cast<std::int64_t>(stored_sample) - 1;
+    const std::int64_t denominator = static_cast<std::int64_t>(
+        std::uint64_t{format_v1::tile_cells} << level);
+    const std::int64_t numerator = 2 * grid_coordinate - denominator;
+    const double value = static_cast<double>(numerator) / static_cast<double>(denominator);
+    if (value < -1.0 || value > 1.0) {
+        return failure<double>(
+            ErrorCode::invalid_argument,
+            "the M3 isolated raster tile apron crosses a QSC face boundary; defer it to M4 topology handling");
+    }
+    return Result<double>::success(value);
+}
+
+[[nodiscard]] Result<std::vector<EncodedTile>> build_raster_tiles(
+    const BuilderConfiguration& configuration,
+    const ConfigurationIdentity& identity,
+    const IRasterSource& source) {
+    auto key = choose_raster_prototype_tile(source, configuration.maximum_level);
+    if (!key) {
+        return Result<std::vector<EncodedTile>>::failure(std::move(key).error());
+    }
+    std::vector<std::uint16_t> samples(serialized_sample_count);
+    for (std::uint16_t y = 0; y < format_v1::serialized_elevation_samples; ++y) {
+        auto v = extended_lattice_coordinate(key.value().y(), y, key.value().level());
+        if (!v) {
+            return Result<std::vector<EncodedTile>>::failure(std::move(v).error());
+        }
+        for (std::uint16_t x = 0; x < format_v1::serialized_elevation_samples; ++x) {
+            auto u = extended_lattice_coordinate(key.value().x(), x, key.value().level());
+            if (!u) {
+                return Result<std::vector<EncodedTile>>::failure(std::move(u).error());
+            }
+            auto coordinate = QscProjection::Inverse(QscCoordinate{
+                static_cast<QscFace>(key.value().face()), u.value(), v.value(), 0.0});
+            if (!coordinate) {
+                return Result<std::vector<EncodedTile>>::failure(std::move(coordinate).error());
+            }
+            auto sampled = source.Sample(coordinate.value());
+            if (!sampled) {
+                Error error = std::move(sampled).error();
+                error.with_tile_key(key.value().encoded());
+                return Result<std::vector<EncodedTile>>::failure(std::move(error));
+            }
+            auto quantized = quantize_elevation(sampled.value().elevation_meters);
+            if (!quantized) {
+                Error error = std::move(quantized).error();
+                error.with_tile_key(key.value().encoded());
+                return Result<std::vector<EncodedTile>>::failure(std::move(error));
+            }
+            samples[std::size_t{y} * format_v1::serialized_elevation_samples + x] =
+                quantized.value();
+        }
+    }
+    auto window_dependency = source.WindowDependency(key.value());
+    if (!window_dependency) {
+        return Result<std::vector<EncodedTile>>::failure(std::move(window_dependency).error());
+    }
+    auto tile = encode_tile(
+        key.value(), samples, identity, source.metadata(), window_dependency.value());
+    if (!tile) {
+        return Result<std::vector<EncodedTile>>::failure(std::move(tile).error());
+    }
+    std::vector<EncodedTile> tiles;
+    tiles.push_back(std::move(tile).value());
+    return Result<std::vector<EncodedTile>>::success(std::move(tiles));
+}
+
+[[nodiscard]] Result<BuildReport> publish_build(
+    const BuilderConfiguration& configuration,
+    const ConfigurationIdentity& identity,
+    const DatasetArtifact& dataset,
+    const DatabaseId& database_id,
+    const std::vector<EncodedTile>& tiles) {
+    auto packs = build_packs(configuration, database_id, tiles);
+    if (!packs) {
+        return Result<BuildReport>::failure(std::move(packs).error());
+    }
+    auto database = make_database_file(identity, dataset, database_id, tiles, packs.value());
+    if (!database) {
+        return Result<BuildReport>::failure(std::move(database).error());
+    }
+    const std::filesystem::path database_path =
+        configuration.output_directory / (configuration.database_name + ".ltdb");
+    auto published = publish_outputs(database_path, database.value().first, packs.value());
+    if (!published) {
+        return Result<BuildReport>::failure(std::move(published).error());
+    }
+
+    BuildReport report;
+    report.database_path = database_path;
+    report.database_content_hash = database.value().second;
+    report.builder_configuration_hash = identity.builder_hash;
+    report.tile_count = tiles.size();
+    report.packs.reserve(packs.value().size());
+    for (const PackArtifact& pack : packs.value()) {
+        report.packs.push_back(PackBuildReport{
+            pack.id,
+            configuration.output_directory / pack.relative_path,
+            pack.hash,
+            pack.bytes.size(),
+        });
+    }
+    return Result<BuildReport>::success(std::move(report));
+}
+
 }  // namespace
 
 Result<BuildReport> build_synthetic(const BuilderConfiguration& configuration) {
@@ -1349,7 +1483,7 @@ Result<BuildReport> build_synthetic(const BuilderConfiguration& configuration) {
     if (!identity) {
         return Result<BuildReport>::failure(std::move(identity).error());
     }
-    auto dataset = make_dataset(configuration, identity.value());
+    auto dataset = make_synthetic_dataset(configuration, identity.value());
     if (!dataset) {
         return Result<BuildReport>::failure(std::move(dataset).error());
     }
@@ -1361,38 +1495,34 @@ Result<BuildReport> build_synthetic(const BuilderConfiguration& configuration) {
     if (!tiles) {
         return Result<BuildReport>::failure(std::move(tiles).error());
     }
-    auto packs = build_packs(configuration, database_id.value(), tiles.value());
-    if (!packs) {
-        return Result<BuildReport>::failure(std::move(packs).error());
-    }
-    auto database = make_database_file(
-        identity.value(), dataset.value(), database_id.value(), tiles.value(), packs.value());
-    if (!database) {
-        return Result<BuildReport>::failure(std::move(database).error());
-    }
+    return publish_build(
+        configuration, identity.value(), dataset.value(), database_id.value(), tiles.value());
+}
 
-    const std::filesystem::path database_path =
-        configuration.output_directory / (configuration.database_name + ".ltdb");
-    auto published = publish_outputs(database_path, database.value().first, packs.value());
-    if (!published) {
-        return Result<BuildReport>::failure(std::move(published).error());
+Result<BuildReport> build_raster_source(const BuilderConfiguration& configuration) {
+    auto identity = identify_configuration(configuration);
+    if (!identity) {
+        return Result<BuildReport>::failure(std::move(identity).error());
     }
-
-    BuildReport report;
-    report.database_path = database_path;
-    report.database_content_hash = database.value().second;
-    report.builder_configuration_hash = identity.value().builder_hash;
-    report.tile_count = tiles.value().size();
-    report.packs.reserve(packs.value().size());
-    for (const PackArtifact& pack : packs.value()) {
-        report.packs.push_back(PackBuildReport{
-            pack.id,
-            configuration.output_directory / pack.relative_path,
-            pack.hash,
-            pack.bytes.size(),
-        });
+    auto source = open_raster_source(configuration, identity.value());
+    if (!source) {
+        return Result<BuildReport>::failure(std::move(source).error());
     }
-    return Result<BuildReport>::success(std::move(report));
+    auto database_id = make_database_id(
+        identity.value().builder_hash, source.value()->metadata().registry_hash);
+    if (!database_id) {
+        return Result<BuildReport>::failure(std::move(database_id).error());
+    }
+    auto tiles = build_raster_tiles(configuration, identity.value(), *source.value());
+    if (!tiles) {
+        return Result<BuildReport>::failure(std::move(tiles).error());
+    }
+    return publish_build(
+        configuration,
+        identity.value(),
+        source.value()->metadata(),
+        database_id.value(),
+        tiles.value());
 }
 
 }  // namespace lunar::terrain::builder

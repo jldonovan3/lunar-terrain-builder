@@ -16,7 +16,7 @@ Use these identity values for the initial M3 subset:
 - Provenance URI: `https://pds-geosciences.wustl.edu/lro/lro-l-lola-3-rdr-v1/lrolol_1xxx/data/sldem2015/`
 - Local root contents: the official tree beginning at `tiles/jp2/`
 - Artifact bundle bytes: `171872390`
-- Artifact bundle SHA-256: `6846f7a9b1955d38e2fd14e6a5181720eaec9f8fc450bd28a3af247d5b4c79fc`
+- Artifact bundle SHA-256: `17810a5b1551a56b865f59c20ae2c78c6aa05112112c557f466e21e19d5b9351`
 
 Members are ordered by unsigned UTF-8 bytes of the following source-relative paths, as required by the v1 format:
 
@@ -33,7 +33,7 @@ These values were verified against the official PDS files on 2026-08-22. Keep th
 - Windows 10 or 11 with Windows PowerShell 5.1 or PowerShell 7.
 - `curl.exe` available on `PATH`. Invoke `curl.exe`, not `curl`, because Windows PowerShell may define `curl` as an alias.
 - At least 250 MiB free for the M3 subset. Reserve at least 6 GiB before downloading all 32 JP2 tile bundles.
-- A data directory outside the repository. This workflow defaults to `%USERPROFILE%\LunarTerrainData\SLDEM2015`; another persistent local or mounted path is acceptable.
+- A data directory outside the repository. This workflow defaults to `%DEV%\LunarTerrainData\SLDEM2015`; another persistent local or mounted path is acceptable.
 
 Check the prerequisite before downloading:
 
@@ -52,7 +52,7 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
 if ([string]::IsNullOrWhiteSpace($env:SLDEM2015_ROOT)) {
-    $SldemRoot = Join-Path $env:USERPROFILE "LunarTerrainData\SLDEM2015"
+    $SldemRoot = Join-Path $env:DEV "LunarTerrainData\SLDEM2015"
 } else {
     $SldemRoot = $env:SLDEM2015_ROOT
 }
@@ -184,6 +184,7 @@ $Stream = [System.IO.MemoryStream]::new()
 $Writer = [System.IO.BinaryWriter]::new($Stream, [System.Text.Encoding]::UTF8, $true)
 
 $Writer.Write([System.Text.Encoding]::ASCII.GetBytes("LTDB_ARTIFACT_BUNDLE_V1"))
+$Writer.Write([byte]0)
 $Writer.Write([uint32]$BundleMembers.Count)
 
 foreach ($Member in $BundleMembers) {
@@ -206,7 +207,7 @@ $SHA256.Dispose()
 $Writer.Dispose()
 $Stream.Dispose()
 
-$ExpectedBundleDigest = "6846f7a9b1955d38e2fd14e6a5181720eaec9f8fc450bd28a3af247d5b4c79fc"
+$ExpectedBundleDigest = "17810a5b1551a56b865f59c20ae2c78c6aa05112112c557f466e21e19d5b9351"
 if ($BundleDigest -ne $ExpectedBundleDigest) {
     throw "Artifact bundle SHA-256 mismatch: expected $ExpectedBundleDigest, got $BundleDigest"
 }

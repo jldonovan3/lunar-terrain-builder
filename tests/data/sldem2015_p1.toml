@@ -1,0 +1,66 @@
+[database]
+name = "MoonSLDEM2015P1"
+output_directory = "../../out/m3-sldem2015"
+format_major = 1
+format_minor = 0
+
+[datum]
+reference_radius_m = 1737400.0
+elevation_origin_m = -16384.0
+elevation_step_m = 0.5
+
+[projection]
+type = "qsc"
+version = 1
+
+[tiles]
+cells = 256
+apron = 1
+max_level = 8
+
+[packaging]
+target_pack_bytes = 1073741824
+codec = "zstd"
+codec_level = 3
+
+[raster]
+stable_key = "nasa.sldem2015.512ppd.v1"
+source_uri = "https://pds-geosciences.wustl.edu/lro/lro-l-lola-3-rdr-v1/lrolol_1xxx/data/sldem2015/"
+product_name = "SLDEM2015 512 pixels per degree"
+producer = "LRO LOLA Team"
+mission = "Lunar Reconnaissance Orbiter"
+instrument = "Lunar Orbiter Laser Altimeter"
+product_version = "V2.0"
+original_crs = "PDS3 SIMPLE CYLINDRICAL, planetocentric latitude, east-positive longitude"
+license = "NASA Planetary Data System"
+raster_member = "tiles/jp2/sldem2015_512_00n_30n_000_045.jp2"
+auxiliary_member = "tiles/jp2/sldem2015_512_00n_30n_000_045_aux.xml"
+label_member = "tiles/jp2/sldem2015_512_00n_30n_000_045_jp2.lbl"
+expected_data_type = "Int16"
+artifact_bundle_bytes = 171872390
+artifact_bundle_sha256 = "17810a5b1551a56b865f59c20ae2c78c6aa05112112c557f466e21e19d5b9351"
+artifact_members = [
+  { name = "tiles/jp2/sldem2015_512_00n_30n_000_045.jp2", bytes = 171864155, sha256 = "8d6e9bb9687bd19dbc9de57c8044932540bb934e5ef557b473660f5056484a73" },
+  { name = "tiles/jp2/sldem2015_512_00n_30n_000_045_aux.xml", bytes = 3295, sha256 = "c9c013daa77cfbbd68efb157c51198fda3aed157f0d5ebddaf1a94f9151faa71" },
+  { name = "tiles/jp2/sldem2015_512_00n_30n_000_045_jp2.lbl", bytes = 4940, sha256 = "4d8f5edd72cdc486cbe491741a588dc545b7b72baa4cfb0e34cae7389d6305e0" },
+]
+expected_width = 23040
+expected_height = 15360
+west_longitude_degrees = 0.0
+east_longitude_degrees = 45.0
+south_latitude_degrees = 0.0
+north_latitude_degrees = 30.0
+nominal_resolution_meters = 59.2252938
+source_no_data = -32768.0
+sample_scale = 0.5
+sample_offset = 0.0
+elevation_representation = "elevation_meters"
+source_reference_radius_meters = 1737400.0
+no_data_policy = "error"
+metadata_override = true
+priority = 0
+
+[local]
+threads = 1
+cache_directory = "../../out/m3-sldem2015-cache"
+source_root_environment = "SLDEM2015_ROOT"

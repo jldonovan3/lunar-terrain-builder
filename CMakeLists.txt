@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.25)
 
 project(
     LunarTerrainBuilder
-    VERSION 0.2.0
+    VERSION 0.3.0
     DESCRIPTION "Deterministic engine-independent lunar terrain database tooling"
     LANGUAGES CXX
 )
@@ -83,6 +83,8 @@ target_sources(
         src/builder/configuration.cpp
         src/builder/configuration.hpp
         src/builder/container_writer.cpp
+        src/builder/raster_source.cpp
+        src/builder/raster_source.hpp
 )
 target_include_directories(lunar_terrain_builder_lib PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src")
 target_compile_features(lunar_terrain_builder_lib PUBLIC cxx_std_20)
@@ -92,6 +94,7 @@ target_link_libraries(
     PUBLIC LunarTerrain::Core
     PRIVATE
         GDAL::GDAL
+        OpenSSL::Crypto
         PROJ::proj
         unofficial::sqlite3::sqlite3
         tomlplusplus::tomlplusplus
@@ -141,19 +144,46 @@ if(LUNAR_TERRAIN_BUILD_TESTING)
         lunar_terrain_builder_tests
         tests/builder/builder_tests.cpp
         tests/builder/projection_oracle_tests.cpp
+        tests/builder/raster_source_tests.cpp
     )
     target_compile_features(lunar_terrain_builder_tests PRIVATE cxx_std_20)
     set_target_properties(lunar_terrain_builder_tests PROPERTIES CXX_EXTENSIONS OFF)
     target_link_libraries(
         lunar_terrain_builder_tests
-        PRIVATE lunar_terrain_builder_lib Catch2::Catch2WithMain PROJ::proj
+        PRIVATE lunar_terrain_builder_lib Catch2::Catch2WithMain GDAL::GDAL PROJ::proj
     )
     lunar_terrain_set_warnings(lunar_terrain_builder_tests)
     lunar_terrain_enable_sanitizers(lunar_terrain_builder_tests)
     catch_discover_tests(lunar_terrain_builder_tests TEST_PREFIX "builder.")
 
+    add_executable(
+        lunar_terrain_sldem2015_acceptance_tests
+        tests/builder/sldem2015_acceptance_tests.cpp
+    )
+    target_compile_features(lunar_terrain_sldem2015_acceptance_tests PRIVATE cxx_std_20)
+    set_target_properties(
+        lunar_terrain_sldem2015_acceptance_tests
+        PROPERTIES CXX_EXTENSIONS OFF
+    )
+    target_compile_definitions(
+        lunar_terrain_sldem2015_acceptance_tests
+        PRIVATE
+            LUNAR_TERRAIN_SLDEM_CONFIG="${CMAKE_CURRENT_SOURCE_DIR}/tests/data/sldem2015_p1.toml"
+    )
+    target_link_libraries(
+        lunar_terrain_sldem2015_acceptance_tests
+        PRIVATE lunar_terrain_builder_lib Catch2::Catch2WithMain
+    )
+    lunar_terrain_set_warnings(lunar_terrain_sldem2015_acceptance_tests)
+    lunar_terrain_enable_sanitizers(lunar_terrain_sldem2015_acceptance_tests)
+    catch_discover_tests(
+        lunar_terrain_sldem2015_acceptance_tests
+        TEST_PREFIX "sldem2015."
+        PROPERTIES LABELS sldem2015
+    )
+
     add_test(NAME cli.version COMMAND lunar-terrain --version)
-    set_tests_properties(cli.version PROPERTIES PASS_REGULAR_EXPRESSION "lunar-terrain 0.2.0")
+    set_tests_properties(cli.version PROPERTIES PASS_REGULAR_EXPRESSION "lunar-terrain 0.3.0")
 
     set(lunar_terrain_synthetic_config "${CMAKE_CURRENT_SOURCE_DIR}/tests/data/synthetic_p0.toml")
     set(lunar_terrain_synthetic_database "${CMAKE_CURRENT_SOURCE_DIR}/out/m2-synthetic/MoonSynthetic.ltdb")

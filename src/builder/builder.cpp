@@ -10,6 +10,7 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <numbers>
 #include <utility>
 #include <vector>
 
@@ -186,7 +187,7 @@ namespace {
 }  // namespace
 
 std::string_view version_string() noexcept {
-    return "0.2.0";
+    return "0.3.0";
 }
 
 Result<ScanReport> scan_configuration(const BuilderConfiguration& configuration) {
@@ -194,14 +195,77 @@ Result<ScanReport> scan_configuration(const BuilderConfiguration& configuration)
     if (!identity) {
         return Result<ScanReport>::failure(std::move(identity).error());
     }
-    return Result<ScanReport>::success(ScanReport{
+    ScanReport report{
         configuration.database_name,
-        identity.value().synthetic_dataset_id,
-        configuration.synthetic_stable_key,
-        configuration.synthetic_source_uri,
+        identity.value().dataset_id,
+        configuration.source_kind == BuilderSourceKind::synthetic
+            ? configuration.synthetic_stable_key : configuration.raster->stable_key,
+        configuration.source_kind == BuilderSourceKind::synthetic
+            ? configuration.synthetic_source_uri : configuration.raster->source_uri,
         identity.value().builder_hash,
         identity.value().semantic_hash,
+    };
+    if (configuration.source_kind == BuilderSourceKind::raster) {
+        auto source = open_raster_source(configuration, identity.value());
+        if (!source) {
+            return Result<ScanReport>::failure(std::move(source).error());
+        }
+        report.raster_details = source.value()->details();
+        report.artifact_members = source.value()->metadata().artifact_members;
+        report.artifact_bundle_bytes = source.value()->metadata().artifact_bundle_bytes;
+        report.artifact_bundle_sha256 = source.value()->metadata().artifact_bundle_hash;
+        const GeographicFootprint& footprint = source.value()->details().footprint;
+        double longitude = (footprint.west_longitude_degrees +
+                            footprint.east_longitude_degrees) * 0.5;
+        if (longitude > 180.0) {
+            longitude -= 360.0;
+        }
+        const double latitude = (footprint.south_latitude_degrees +
+                                 footprint.north_latitude_degrees) * 0.5;
+        auto sample = source.value()->Sample(LunarGeodeticCoordinate{
+            latitude * std::numbers::pi_v<double> / 180.0,
+            longitude * std::numbers::pi_v<double> / 180.0,
+            0.0,
+        });
+        if (!sample) {
+            return Result<ScanReport>::failure(std::move(sample).error());
+        }
+        report.center_elevation_meters = sample.value().elevation_meters;
+    }
+    return Result<ScanReport>::success(std::move(report));
+}
+
+Result<PlanReport> plan_configuration(const BuilderConfiguration& configuration) {
+    if (configuration.source_kind == BuilderSourceKind::synthetic) {
+        return plan_synthetic(configuration);
+    }
+    auto identity = identify_configuration(configuration);
+    if (!identity) {
+        return Result<PlanReport>::failure(std::move(identity).error());
+    }
+    auto source = open_raster_source(configuration, identity.value());
+    if (!source) {
+        return Result<PlanReport>::failure(std::move(source).error());
+    }
+    auto key = choose_raster_prototype_tile(*source.value(), configuration.maximum_level);
+    if (!key) {
+        return Result<PlanReport>::failure(std::move(key).error());
+    }
+    constexpr std::uint64_t elevation_bytes =
+        std::uint64_t{format_v1::serialized_elevation_samples} *
+        format_v1::serialized_elevation_samples * 2U;
+    constexpr std::uint64_t provenance_bytes =
+        format_v1::bytes::provenance_header + format_v1::bytes::provenance_palette_entry;
+    return Result<PlanReport>::success(PlanReport{
+        {key.value()},
+        elevation_bytes + provenance_bytes,
     });
+}
+
+Result<BuildReport> build_configuration(const BuilderConfiguration& configuration) {
+    return configuration.source_kind == BuilderSourceKind::synthetic
+        ? build_synthetic(configuration)
+        : build_raster_source(configuration);
 }
 
 Result<PlanReport> plan_synthetic(const BuilderConfiguration& configuration) {
@@ -292,17 +356,61 @@ Result<InspectionReport> inspect_database(
 
 std::string format_report(const ScanReport& report, const bool json) {
     if (json) {
+        std::string raster = "null";
+        if (report.raster_details) {
+            std::string members;
+            for (std::size_t index = 0; index < report.artifact_members.size(); ++index) {
+                if (index != 0) {
+                    members.push_back(',');
+                }
+                const ArtifactMember& member = report.artifact_members[index];
+                members += fmt::format(
+                    "{{\"bytes\":{},\"name\":{},\"sha256\":{}}}",
+                    member.bytes,
+                    json_string(member.name),
+                    json_string(member.sha256.to_hex()));
+            }
+            const RasterSourceDetails& details = *report.raster_details;
+            const std::string representation = details.elevation_representation ==
+                ElevationRepresentation::elevation_meters ? "elevation_meters" : "radius_meters";
+            raster = fmt::format(
+                "{{\"artifact_bundle_bytes\":{},\"artifact_bundle_sha256\":{},"
+                "\"artifact_members\":[{}],\"center_elevation_meters\":{},"
+                "\"data_type\":{},\"driver\":{},\"elevation_representation\":{},"
+                "\"east_longitude_degrees\":{},\"height\":{},"
+                "\"no_data_value\":{},\"north_latitude_degrees\":{},"
+                "\"sample_offset\":{},\"sample_scale\":{},"
+                "\"south_latitude_degrees\":{},\"west_longitude_degrees\":{},\"width\":{}}}",
+                *report.artifact_bundle_bytes,
+                json_string(report.artifact_bundle_sha256->to_hex()),
+                members,
+                *report.center_elevation_meters,
+                json_string(details.data_type_name),
+                json_string(details.driver_name),
+                json_string(representation),
+                details.footprint.east_longitude_degrees,
+                details.height,
+                details.no_data_value,
+                details.footprint.north_latitude_degrees,
+                details.sample_offset,
+                details.sample_scale,
+                details.footprint.south_latitude_degrees,
+                details.footprint.west_longitude_degrees,
+                details.width);
+        }
         return fmt::format(
             "{{\"builder_configuration_sha256\":{},\"database_name\":{},\"dataset_id\":{},"
-            "\"semantic_configuration_sha256\":{},\"source_uri\":{},\"stable_key\":{}}}\n",
+            "\"raster\":{},\"semantic_configuration_sha256\":{},\"source_uri\":{},"
+            "\"stable_key\":{}}}\n",
             json_string(report.builder_configuration_hash.to_hex()),
             json_string(report.database_name),
             report.dataset_id.value,
+            raster,
             json_string(report.semantic_configuration_hash.to_hex()),
             json_string(report.source_uri),
             json_string(report.stable_key));
     }
-    return fmt::format(
+    std::string text = fmt::format(
         "database: {}\ndataset: {} ({})\nsource: {}\nbuilder configuration sha256: {}\n"
         "semantic configuration sha256: {}\n",
         report.database_name,
@@ -311,6 +419,28 @@ std::string format_report(const ScanReport& report, const bool json) {
         report.source_uri,
         report.builder_configuration_hash.to_hex(),
         report.semantic_configuration_hash.to_hex());
+    if (report.raster_details) {
+        const RasterSourceDetails& details = *report.raster_details;
+        text += fmt::format(
+            "driver: {} ({})\nraster: {} x {}\ncoverage: {}..{} degrees east, {}..{} degrees north\n"
+            "no-data: {}\nsample scale/offset: {} / {}\nartifact bundle: {} bytes, {}\n"
+            "center elevation: {} m\n",
+            details.driver_name,
+            details.data_type_name,
+            details.width,
+            details.height,
+            details.footprint.west_longitude_degrees,
+            details.footprint.east_longitude_degrees,
+            details.footprint.south_latitude_degrees,
+            details.footprint.north_latitude_degrees,
+            details.no_data_value,
+            details.sample_scale,
+            details.sample_offset,
+            *report.artifact_bundle_bytes,
+            report.artifact_bundle_sha256->to_hex(),
+            *report.center_elevation_meters);
+    }
+    return text;
 }
 
 std::string format_report(const PlanReport& report, const bool json) {

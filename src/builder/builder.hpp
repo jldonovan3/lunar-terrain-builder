@@ -13,6 +13,7 @@
 #include <lunar/terrain/tile_key.hpp>
 
 #include "builder/configuration.hpp"
+#include "builder/raster_source.hpp"
 
 namespace lunar::terrain::builder {
 
@@ -23,6 +24,11 @@ struct ScanReport {
     std::string source_uri;
     Sha256Digest builder_configuration_hash;
     Sha256Digest semantic_configuration_hash;
+    std::optional<RasterSourceDetails> raster_details;
+    std::vector<ArtifactMember> artifact_members;
+    std::optional<std::uint64_t> artifact_bundle_bytes;
+    std::optional<Sha256Digest> artifact_bundle_sha256;
+    std::optional<double> center_elevation_meters;
 };
 
 struct PlanReport {
@@ -67,8 +73,11 @@ struct InspectionReport {
 
 [[nodiscard]] std::string_view version_string() noexcept;
 [[nodiscard]] Result<ScanReport> scan_configuration(const BuilderConfiguration& configuration);
+[[nodiscard]] Result<PlanReport> plan_configuration(const BuilderConfiguration& configuration);
+[[nodiscard]] Result<BuildReport> build_configuration(const BuilderConfiguration& configuration);
 [[nodiscard]] Result<PlanReport> plan_synthetic(const BuilderConfiguration& configuration);
 [[nodiscard]] Result<BuildReport> build_synthetic(const BuilderConfiguration& configuration);
+[[nodiscard]] Result<BuildReport> build_raster_source(const BuilderConfiguration& configuration);
 [[nodiscard]] Result<ValidationReport> validate_database(
     const std::filesystem::path& path,
     bool full);
