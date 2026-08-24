@@ -136,6 +136,18 @@ Acceptance: an L8/L10/L12 synthetic hierarchy is connected and sparse; unchanged
 
 Acceptance: a complete configured build publishes validated `.ltdb/.ltp` outputs, survives corruption tests and interrupted builds, supports inspection/diff/export, and records reproducible benchmark results.
 
+### M8 — Real lunar DEM product qualification spike
+
+- Treat M0–M7 as controlled implementation gates; M8 is the first acceptance stage that fuses and benchmarks multiple independently provisioned real DEM products. Preserve the frozen golden vectors, generated-raster tests, synthetic hierarchy tests, and pinned single-source SLDEM2015 run.
+- Extend `provisioning/` with portable, resumable, verification-only-capable acquisition profiles and pinned artifact definitions. Keep all source bytes, derived rasters, databases, packs, caches, and staging output outside git.
+- Qualify a NASA/PDS-first stack consisting of a global LOLA coverage foundation, SLDEM2015 as the preferred ±60° backbone, a LROC NAC regional refinement, and a south-polar LOLA refinement with effective-resolution and quality companions. Base hierarchy levels on qualified effective resolution rather than advertised grid spacing.
+- Run required mid-latitude, SLDEM-coverage-boundary, and polar profiles through the complete Builder/Core/operator path. Compare applicable v1 fusion policies and verify scientific reconstruction, transitions, seams, sparse L7–L13 hierarchy, provenance, quality, deterministic source ordering, and incremental convergence.
+- Benchmark the required profiles with the M7 metrics and complete one larger opt-in scale run using all 32 SLDEM2015 tiles, the qualified global foundation, and selected refinements. Do not silently change v1 semantics in response to benchmark results.
+- Classify each investigated product/policy as qualified, qualified with explicit limitations, rejected, or deferred. Treat any required format or algorithm-semantic revision as separately approved follow-up work.
+- Follow the detailed [`M8 Lunar DEM Product Qualification Spike`](03_M8_LunarDEMProductQualification.md) plan.
+
+Acceptance: hash-pinned real-data profiles for mid-latitude refinement, the SLDEM coverage boundary, and the south pole pass full structural/scientific validation, same-platform deterministic rebuilds, incremental-versus-clean equivalence, provenance/quality diagnostics, and operator workflows; the opt-in scale profile completes once with reproducible benchmark evidence and a final product/policy qualification record.
+
 ## Test Plan
 
 - Unit tests:
