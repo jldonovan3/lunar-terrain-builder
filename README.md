@@ -19,7 +19,7 @@ Streaming (or packaging / compressing) a 1:1 full-scale, continuous, spherical M
 
 Four implementation units:
 
-### `LunarTerrainCore` (M2 complete)
+### `LunarTerrainCore`
     Pure C++ data structures and algorithms
     Tile IDs
     database reader
@@ -27,7 +27,7 @@ Four implementation units:
     coordinate primitives
     no Unreal dependency
 
-### `LunarTerrainBuilder` (M3 complete)
+### `LunarTerrainBuilder`
     Standalone C++20 CLI
     GDAL / PROJ
     DEM ingestion
@@ -37,7 +37,7 @@ Four implementation units:
 
 #### `LunarTerrainBuilder` temp sythetic source data pathing
 
-The M2 synthetic P0 path is available through the committed
+The synthetic P0 path is available through the committed
 `tests/data/synthetic_p0.toml` configuration:
 
 ```text
@@ -51,7 +51,7 @@ lunar-terrain inspect out/m2-synthetic/MoonSynthetic.ltdb QSC/F0/L00/0000/0000 -
 `Builder` outputs six deterministic level-zero QSC face packs and the LTDB manifest.
 Generated `.ltdb`/`.ltp` outputs remain untracked build products.
 
-The M3 SLDEM2015 P1 path is configured by
+The SLDEM2015 P1 path is configured by
 `tests/data/sldem2015_p1.toml`. It catalogs and verifies the pinned raster
 artifact bundle, applies explicit datum and no-data rules, selects a fully
 covered QSC tile, and publishes a deterministic database through the same
