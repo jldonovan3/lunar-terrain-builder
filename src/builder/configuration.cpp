@@ -14,6 +14,7 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -267,50 +268,38 @@ void append_domain(ByteVector& bytes, const std::string_view domain) {
     return result;
 }
 
-[[nodiscard]] std::string canonical_semantic_json(const BuilderConfiguration& configuration) {
-    if (configuration.source_kind == BuilderSourceKind::synthetic) {
-        return fmt::format(
-            "{{\"algorithm_version\":1,\"apron\":{{\"algorithm\":"
-            "\"quantized_neighbor_or_virtual_v1\",\"corner_algorithm\":"
-            "\"topology_diagonal_v1\"}},\"datasets\":[{{\"amplitude_meters\":{},"
-            "\"source_uri\":{},\"stable_key\":{}}}],\"datum\":{{\"elevation_origin_m\":-16384,"
-            "\"elevation_step_m\":0.5,\"reference_radius_m\":1737400}},"
-            "\"fusion\":{{\"algorithm\":\"synthetic_analytic_v1\",\"version\":1}},"
-            "\"projection\":{{\"id\":1,\"version\":1}},\"quantization\":{{\"id\":1}},"
-            "\"seam\":{{\"algorithm\":\"lowest_tile_key_patches_v1\","
-            "\"quantization_order\":\"after_seam\"}},"
-            "\"tiles\":{{\"apron\":1,\"cells\":256,\"maximum_level\":0}}}}",
-            configuration.synthetic_amplitude_meters,
-            json_string(configuration.synthetic_source_uri),
-            json_string(configuration.synthetic_stable_key));
+[[nodiscard]] std::string_view fusion_policy_name(const FusionPolicy policy) noexcept {
+    switch (policy) {
+        case FusionPolicy::replace:
+            return "Replace";
+        case FusionPolicy::bias_corrected_replace:
+            return "BiasCorrectedReplace";
+        case FusionPolicy::residual_refinement_v1:
+            return "ResidualRefinement_v1";
     }
+    return "Replace";
+}
 
-    const RasterConfiguration& raster = *configuration.raster;
+[[nodiscard]] Result<DatasetId> make_dataset_id(std::string_view key);
+
+[[nodiscard]] std::string canonical_raster_json(const RasterConfiguration& raster) {
     const std::string representation = raster.elevation_representation ==
         ElevationRepresentation::elevation_meters ? "elevation_meters" : "radius_meters";
     const std::string no_data_policy = raster.no_data_policy == NoDataPolicy::error
         ? "error" : "nearest_valid";
     return fmt::format(
-        "{{\"algorithm_version\":1,\"apron\":{{\"algorithm\":"
-        "\"quantized_neighbor_or_virtual_v1\",\"corner_algorithm\":"
-        "\"topology_diagonal_v1\"}},\"datasets\":[{{\"artifact_bundle_bytes\":{},"
-        "\"artifact_bundle_sha256\":{},\"artifact_members\":[{}],"
-        "\"auxiliary_member\":{},\"bounds_degrees\":{{\"east\":{},\"north\":{},"
-        "\"south\":{},\"west\":{}}},\"elevation_representation\":{},"
-        "\"expected_data_type\":{},\"expected_height\":{},\"expected_width\":{},"
-        "\"fusion_policy\":\"Replace\",\"instrument\":{},\"label_member\":{},"
-        "\"license\":{},\"metadata_override\":{},\"mission\":{},\"no_data_policy\":{},"
-        "\"nominal_resolution_m\":{},\"original_crs\":{},\"priority\":{},\"producer\":{},"
-        "\"product_name\":{},\"product_version\":{},\"raster_member\":{},"
-        "\"sample_offset\":{},\"sample_scale\":{},"
+        "{{\"artifact_bundle_bytes\":{},\"artifact_bundle_sha256\":{},"
+        "\"artifact_members\":[{}],\"auxiliary_member\":{},"
+        "\"bounds_degrees\":{{\"east\":{},\"north\":{},\"south\":{},\"west\":{}}},"
+        "\"elevation_representation\":{},\"expected_data_type\":{},"
+        "\"expected_height\":{},\"expected_width\":{},\"fusion_policy\":{},"
+        "\"instrument\":{},\"label_member\":{},\"license\":{},"
+        "\"metadata_override\":{},\"mission\":{},\"no_data_policy\":{},"
+        "\"nominal_resolution_m\":{},\"original_crs\":{},\"priority\":{},"
+        "\"producer\":{},\"product_name\":{},\"product_version\":{},"
+        "\"raster_member\":{},\"role\":{},\"sample_offset\":{},\"sample_scale\":{},"
         "\"source_no_data\":{},\"source_reference_radius_m\":{},\"source_uri\":{},"
-        "\"stable_key\":{}}}],\"datum\":{{\"elevation_origin_m\":-16384,"
-        "\"elevation_step_m\":0.5,\"reference_radius_m\":1737400}},"
-        "\"fusion\":{{\"algorithm\":\"Replace\",\"version\":1}},"
-        "\"projection\":{{\"id\":1,\"version\":1}},\"quantization\":{{\"id\":1}},"
-        "\"seam\":{{\"algorithm\":\"lowest_tile_key_patches_v1\","
-        "\"quantization_order\":\"after_seam\"}},"
-        "\"tiles\":{{\"apron\":1,\"cells\":256,\"maximum_level\":{}}}}}",
+        "\"stable_key\":{}}}",
         optional_u64_json(raster.expected_bundle_bytes),
         optional_digest_json(raster.expected_bundle_sha256),
         canonical_artifact_members_json(raster.artifact_members),
@@ -323,6 +312,7 @@ void append_domain(ByteVector& bytes, const std::string_view domain) {
         json_string(raster.expected_data_type),
         raster.expected_height,
         raster.expected_width,
+        json_string(fusion_policy_name(raster.fusion_policy)),
         json_string(raster.instrument),
         json_string(raster.label_member),
         json_string(raster.license),
@@ -336,13 +326,75 @@ void append_domain(ByteVector& bytes, const std::string_view domain) {
         json_string(raster.product_name),
         json_string(raster.product_version),
         json_string(raster.raster_member),
+        json_string(raster.role == RasterSourceRole::refinement ? "refinement" : "base"),
         raster.sample_offset,
         raster.sample_scale,
         raster.source_no_data,
         raster.source_reference_radius_meters,
         json_string(raster.source_uri),
-        json_string(raster.stable_key),
-        configuration.maximum_level);
+        json_string(raster.stable_key));
+}
+
+[[nodiscard]] Result<std::string> canonical_semantic_json(
+    const BuilderConfiguration& configuration) {
+    if (configuration.source_kind == BuilderSourceKind::synthetic) {
+        return Result<std::string>::success(fmt::format(
+            "{{\"algorithm_version\":1,\"apron\":{{\"algorithm\":"
+            "\"quantized_neighbor_or_virtual_v1\",\"corner_algorithm\":"
+            "\"topology_diagonal_v1\"}},\"datasets\":[{{\"amplitude_meters\":{},"
+            "\"source_uri\":{},\"stable_key\":{}}}],\"datum\":{{\"elevation_origin_m\":-16384,"
+            "\"elevation_step_m\":0.5,\"reference_radius_m\":1737400}},"
+            "\"fusion\":{{\"algorithm\":\"synthetic_analytic_v1\",\"version\":1}},"
+            "\"projection\":{{\"id\":1,\"version\":1}},\"quantization\":{{\"id\":1}},"
+            "\"seam\":{{\"algorithm\":\"lowest_tile_key_patches_v1\","
+            "\"quantization_order\":\"after_seam\"}},"
+            "\"tiles\":{{\"apron\":1,\"cells\":256,\"maximum_level\":0}}}}",
+            configuration.synthetic_amplitude_meters,
+            json_string(configuration.synthetic_source_uri),
+            json_string(configuration.synthetic_stable_key)));
+    }
+
+    std::vector<std::pair<const RasterConfiguration*, DatasetId>> rasters;
+    rasters.reserve(configuration.rasters.size());
+    for (const RasterConfiguration& raster : configuration.rasters) {
+        auto dataset_id = make_dataset_id(raster.stable_key);
+        if (!dataset_id) {
+            return Result<std::string>::failure(std::move(dataset_id).error());
+        }
+        rasters.emplace_back(&raster, dataset_id.value());
+    }
+    std::ranges::sort(rasters, {}, [](const auto& raster) {
+        return std::tuple{raster.first->priority, raster.second.value};
+    });
+    std::string datasets;
+    for (std::size_t index = 0; index < rasters.size(); ++index) {
+        if (index != 0) {
+            datasets.push_back(',');
+        }
+        datasets += canonical_raster_json(*rasters[index].first);
+    }
+    return Result<std::string>::success(fmt::format(
+        "{{\"algorithm_version\":1,\"apron\":{{\"algorithm\":"
+        "\"quantized_neighbor_or_virtual_v1\",\"corner_algorithm\":"
+        "\"topology_diagonal_v1\"}},\"datasets\":[{}],"
+        "\"datum\":{{\"elevation_origin_m\":-16384,"
+        "\"elevation_step_m\":0.5,\"reference_radius_m\":1737400}},"
+        "\"fusion\":{{\"algorithm\":\"heterogeneous_fusion_v1\","
+        "\"bias_correction\":\"row_major_mean_overlap_v1\","
+        "\"filter\":\"separable_binomial_1_4_6_4_1_over_16\","
+        "\"maximum_filter_passes\":64,"
+        "\"no_data\":\"normalized_taps_half_weight_fallback\","
+        "\"pass_count\":\"ceil_log2_resolution_ratio_min_1\","
+        "\"provenance\":\"average_core_weights_residual_half_v1\","
+        "\"quality\":\"or_4x4_v1\","
+        "\"source_order\":\"priority_then_dataset_id\","
+        "\"transition\":\"smoothstep_manhattan_32_samples\",\"version\":1}},"
+        "\"projection\":{{\"id\":1,\"version\":1}},\"quantization\":{{\"id\":1}},"
+        "\"seam\":{{\"algorithm\":\"lowest_tile_key_patches_v1\","
+        "\"quantization_order\":\"after_seam\"}},"
+        "\"tiles\":{{\"apron\":1,\"cells\":256,\"maximum_level\":{}}}}}",
+        datasets,
+        configuration.maximum_level));
 }
 
 [[nodiscard]] std::string canonical_builder_json(
@@ -446,15 +498,9 @@ void append_domain(ByteVector& bytes, const std::string_view domain) {
 
 }  // namespace
 
-Result<BuilderConfiguration> load_configuration(const std::filesystem::path& path) {
-    toml::table root;
-    try {
-        root = toml::parse_file(path.string());
-    } catch (const toml::parse_error& error) {
-        return Result<BuilderConfiguration>::failure(Error{
-            ErrorCode::parse_error,
-            fmt::format("TOML parse failed: {}", error.description())}.with_path(path.string()));
-    }
+[[nodiscard]] Result<BuilderConfiguration> load_configuration_table(
+    toml::table root,
+    const std::filesystem::path& path) {
 
     auto top_keys = validate_keys(
         root,
@@ -502,7 +548,8 @@ Result<BuilderConfiguration> load_configuration(const std::filesystem::path& pat
              "expected_width", "expected_height", "west_longitude_degrees", "east_longitude_degrees",
              "south_latitude_degrees", "north_latitude_degrees", "nominal_resolution_meters",
              "source_no_data", "sample_scale", "sample_offset", "elevation_representation",
-             "source_reference_radius_meters", "no_data_policy", "metadata_override", "priority"},
+             "source_reference_radius_meters", "no_data_policy", "metadata_override", "priority",
+             "role", "fusion_policy"},
             path,
             "raster"),
         local.value() == nullptr ? Result<void>::success() : validate_keys(
@@ -653,11 +700,14 @@ Result<BuilderConfiguration> load_configuration(const std::filesystem::path& pat
     auto metadata_override = optional_value<bool>(
         raster.value(), "raster", "metadata_override", false, path);
     auto priority = optional_value<std::int64_t>(raster.value(), "raster", "priority", 0, path);
+    auto role = optional_value<std::string>(raster.value(), "raster", "role", "base", path);
+    auto fusion_policy = optional_value<std::string>(
+        raster.value(), "raster", "fusion_policy", "", path);
     if (!(raster_key && raster_uri && product_name && producer && mission && instrument &&
           product_version && original_crs && license && raster_member && auxiliary_member &&
           label_member && expected_data_type && members && expected_width && expected_height && west && east && south &&
           north && resolution && no_data && sample_scale && sample_offset && representation &&
-          source_radius && no_data_policy && metadata_override && priority)) {
+          source_radius && no_data_policy && metadata_override && priority && role && fusion_policy)) {
         const Error* first_error = nullptr;
         const auto capture = [&first_error](const auto& value) {
             if (!value && first_error == nullptr) {
@@ -670,7 +720,8 @@ Result<BuilderConfiguration> load_configuration(const std::filesystem::path& pat
         capture(expected_data_type); capture(members); capture(expected_width); capture(expected_height); capture(west);
         capture(east); capture(south); capture(north); capture(resolution); capture(no_data);
         capture(sample_scale); capture(sample_offset); capture(representation); capture(source_radius);
-        capture(no_data_policy); capture(metadata_override); capture(priority);
+        capture(no_data_policy); capture(metadata_override); capture(priority); capture(role);
+        capture(fusion_policy);
         return Result<BuilderConfiguration>::failure(*first_error);
     }
 
@@ -782,6 +833,12 @@ Result<BuilderConfiguration> load_configuration(const std::filesystem::path& pat
         require_equal(priority.value() >= std::numeric_limits<std::int32_t>::min() &&
                           priority.value() <= std::numeric_limits<std::int32_t>::max(),
                       path, "raster.priority is outside the supported range"),
+        require_equal(role.value() == "base" || role.value() == "refinement",
+                      path, "raster.role must be 'base' or 'refinement'"),
+        require_equal(fusion_policy.value().empty() || fusion_policy.value() == "Replace" ||
+                          fusion_policy.value() == "BiasCorrectedReplace" ||
+                          fusion_policy.value() == "ResidualRefinement_v1",
+                      path, "raster.fusion_policy is not a supported v1 policy"),
     };
     for (const auto& check : raster_checks) {
         if (!check) {
@@ -818,41 +875,135 @@ Result<BuilderConfiguration> load_configuration(const std::filesystem::path& pat
     raster_configuration.sample_offset = sample_offset.value();
     raster_configuration.source_reference_radius_meters = source_radius.value();
     raster_configuration.priority = static_cast<std::int32_t>(priority.value());
+    raster_configuration.role = role.value() == "refinement"
+        ? RasterSourceRole::refinement : RasterSourceRole::base;
+    const std::string selected_policy = fusion_policy.value().empty()
+        ? (raster_configuration.role == RasterSourceRole::refinement
+            ? "ResidualRefinement_v1" : "Replace")
+        : fusion_policy.value();
+    if (selected_policy == "BiasCorrectedReplace") {
+        raster_configuration.fusion_policy = FusionPolicy::bias_corrected_replace;
+    } else if (selected_policy == "ResidualRefinement_v1") {
+        raster_configuration.fusion_policy = FusionPolicy::residual_refinement_v1;
+    } else {
+        raster_configuration.fusion_policy = FusionPolicy::replace;
+    }
     raster_configuration.elevation_representation = representation.value() == "elevation_meters"
         ? ElevationRepresentation::elevation_meters : ElevationRepresentation::radius_meters;
     raster_configuration.no_data_policy = no_data_policy.value() == "error"
         ? NoDataPolicy::error : NoDataPolicy::nearest_valid;
     raster_configuration.metadata_override = metadata_override.value();
     configuration.source_kind = BuilderSourceKind::raster;
-    configuration.raster = std::move(raster_configuration);
+    configuration.rasters.push_back(std::move(raster_configuration));
     return Result<BuilderConfiguration>::success(std::move(configuration));
+}
+
+Result<BuilderConfiguration> load_configuration(const std::filesystem::path& path) {
+    toml::table root;
+    try {
+        root = toml::parse_file(path.string());
+    } catch (const toml::parse_error& error) {
+        return Result<BuilderConfiguration>::failure(Error{
+            ErrorCode::parse_error,
+            fmt::format("TOML parse failed: {}", error.description())}.with_path(path.string()));
+    }
+
+    const toml::array* raster_array = root["raster"].as_array();
+    if (raster_array == nullptr) {
+        return load_configuration_table(std::move(root), path);
+    }
+    if (raster_array->empty()) {
+        return Result<BuilderConfiguration>::failure(configuration_error(
+            path, "configuration raster array must not be empty"));
+    }
+
+    std::optional<BuilderConfiguration> combined;
+    for (std::size_t index = 0; index < raster_array->size(); ++index) {
+        const toml::table* raster = raster_array->get(index)->as_table();
+        if (raster == nullptr) {
+            return Result<BuilderConfiguration>::failure(configuration_error(
+                path, "each raster array entry must be a table"));
+        }
+        toml::table single = root;
+        single.erase("raster");
+        single.insert("raster", *raster);
+        auto parsed = load_configuration_table(std::move(single), path);
+        if (!parsed) {
+            return parsed;
+        }
+        if (!combined) {
+            combined = std::move(parsed).value();
+        } else {
+            combined->rasters.push_back(std::move(parsed).value().rasters.front());
+        }
+    }
+
+    std::vector<std::string_view> keys;
+    keys.reserve(combined->rasters.size());
+    for (const RasterConfiguration& raster : combined->rasters) {
+        keys.push_back(raster.stable_key);
+    }
+    std::ranges::sort(keys);
+    if (std::ranges::adjacent_find(keys) != keys.end()) {
+        return Result<BuilderConfiguration>::failure(configuration_error(
+            path, "raster stable keys must be unique"));
+    }
+    return Result<BuilderConfiguration>::success(std::move(*combined));
 }
 
 Result<ConfigurationIdentity> identify_configuration(
     const BuilderConfiguration& configuration) {
-    const std::string semantic = canonical_semantic_json(configuration);
-    const std::string builder = canonical_builder_json(configuration, semantic);
+    if (configuration.source_kind == BuilderSourceKind::raster && configuration.rasters.empty()) {
+        return Result<ConfigurationIdentity>::failure(Error{
+            ErrorCode::invalid_argument, "raster configuration contains no datasets"});
+    }
+    auto semantic = canonical_semantic_json(configuration);
+    if (!semantic) {
+        return Result<ConfigurationIdentity>::failure(std::move(semantic).error());
+    }
+    const std::string builder = canonical_builder_json(configuration, semantic.value());
     auto builder_hash = framed_hash("LTDB_BUILDER_CONFIG_V1", builder);
     if (!builder_hash) {
         return Result<ConfigurationIdentity>::failure(std::move(builder_hash).error());
     }
-    auto semantic_hash = framed_hash("LTDB_SEMANTIC_CONFIG_V1", semantic);
+    auto semantic_hash = framed_hash("LTDB_SEMANTIC_CONFIG_V1", semantic.value());
     if (!semantic_hash) {
         return Result<ConfigurationIdentity>::failure(std::move(semantic_hash).error());
     }
-    const std::string_view key = configuration.source_kind == BuilderSourceKind::synthetic
-        ? std::string_view{configuration.synthetic_stable_key}
-        : std::string_view{configuration.raster->stable_key};
-    auto dataset_id = make_dataset_id(key);
-    if (!dataset_id) {
-        return Result<ConfigurationIdentity>::failure(std::move(dataset_id).error());
+    std::vector<DatasetId> dataset_ids;
+    if (configuration.source_kind == BuilderSourceKind::synthetic) {
+        auto dataset_id = make_dataset_id(configuration.synthetic_stable_key);
+        if (!dataset_id) {
+            return Result<ConfigurationIdentity>::failure(std::move(dataset_id).error());
+        }
+        dataset_ids.push_back(dataset_id.value());
+    } else {
+        dataset_ids.reserve(configuration.rasters.size());
+        for (const RasterConfiguration& raster : configuration.rasters) {
+            auto dataset_id = make_dataset_id(raster.stable_key);
+            if (!dataset_id) {
+                return Result<ConfigurationIdentity>::failure(std::move(dataset_id).error());
+            }
+            dataset_ids.push_back(dataset_id.value());
+        }
+        std::vector<std::uint32_t> sorted_ids;
+        sorted_ids.reserve(dataset_ids.size());
+        for (const DatasetId id : dataset_ids) {
+            sorted_ids.push_back(id.value);
+        }
+        std::ranges::sort(sorted_ids);
+        if (std::ranges::adjacent_find(sorted_ids) != sorted_ids.end()) {
+            return Result<ConfigurationIdentity>::failure(Error{
+                ErrorCode::invalid_argument,
+                "raster stable keys collide in the v1 DatasetID domain"});
+        }
     }
     return Result<ConfigurationIdentity>::success(ConfigurationIdentity{
         builder,
-        semantic,
+        std::move(semantic).value(),
         builder_hash.value(),
         semantic_hash.value(),
-        dataset_id.value(),
+        std::move(dataset_ids),
     });
 }
 

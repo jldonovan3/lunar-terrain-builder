@@ -102,7 +102,7 @@ TEST_CASE("the pinned SLDEM2015 subset builds and reconstructs through Core") {
     REQUIRE(configuration);
     auto identity = identify_configuration(configuration.value());
     REQUIRE(identity);
-    CHECK(identity.value().dataset_id.value == 2'012'013'082U);
+    CHECK(identity.value().dataset_ids.front().value == 2'012'013'082U);
 
     auto source = open_raster_source(configuration.value(), identity.value());
     REQUIRE(source);
@@ -175,7 +175,8 @@ TEST_CASE("the pinned SLDEM2015 subset builds and reconstructs through Core") {
     REQUIRE(tile);
     REQUIRE(tile.value().provenance());
     REQUIRE(tile.value().provenance()->palette.size() == 1);
-    CHECK(tile.value().provenance()->palette.front().dataset_id == identity.value().dataset_id);
+    CHECK(tile.value().provenance()->palette.front().dataset_id ==
+          identity.value().dataset_ids.front());
     const DecodedChannel* elevation = elevation_channel(tile.value());
     REQUIRE(elevation != nullptr);
 

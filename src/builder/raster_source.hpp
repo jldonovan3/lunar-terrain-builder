@@ -76,6 +76,11 @@ public:
     [[nodiscard]] virtual bool Covers(LunarGeodeticCoordinate coordinate) const noexcept = 0;
     [[nodiscard]] virtual Result<RawTerrainSample> Sample(
         LunarGeodeticCoordinate coordinate) const = 0;
+    // Fusion treats coverage gaps and strict source no-data as absence so a
+    // lower-priority source can remain authoritative there. Other failures are
+    // still reported.
+    [[nodiscard]] virtual Result<std::optional<RawTerrainSample>> TrySample(
+        LunarGeodeticCoordinate coordinate) const;
     [[nodiscard]] virtual Result<Sha256Digest> WindowDependency(
         LunarTileKey key) const = 0;
 };
@@ -94,6 +99,10 @@ private:
 };
 
 [[nodiscard]] Result<std::unique_ptr<IRasterSource>> open_raster_source(
+    const BuilderConfiguration& configuration,
+    const ConfigurationIdentity& identity);
+
+[[nodiscard]] Result<std::vector<std::unique_ptr<IRasterSource>>> open_raster_sources(
     const BuilderConfiguration& configuration,
     const ConfigurationIdentity& identity);
 

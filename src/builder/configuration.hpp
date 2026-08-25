@@ -27,6 +27,17 @@ enum class NoDataPolicy : std::uint8_t {
     nearest_valid,
 };
 
+enum class RasterSourceRole : std::uint8_t {
+    base,
+    refinement,
+};
+
+enum class FusionPolicy : std::uint8_t {
+    replace,
+    bias_corrected_replace,
+    residual_refinement_v1,
+};
+
 struct ArtifactMemberConfiguration {
     std::string name;
     std::optional<std::uint64_t> expected_bytes;
@@ -63,6 +74,8 @@ struct RasterConfiguration {
     double sample_offset{};
     double source_reference_radius_meters{1'737'400.0};
     std::int32_t priority{};
+    RasterSourceRole role{RasterSourceRole::base};
+    FusionPolicy fusion_policy{FusionPolicy::replace};
     ElevationRepresentation elevation_representation{ElevationRepresentation::elevation_meters};
     NoDataPolicy no_data_policy{NoDataPolicy::error};
     bool metadata_override{};
@@ -76,7 +89,7 @@ struct BuilderConfiguration {
     BuilderSourceKind source_kind{BuilderSourceKind::synthetic};
     std::string synthetic_stable_key;
     std::string synthetic_source_uri;
-    std::optional<RasterConfiguration> raster;
+    std::vector<RasterConfiguration> rasters;
     std::uint64_t target_pack_bytes{1'073'741'824ULL};
     std::uint32_t worker_threads{1};
     std::int32_t synthetic_amplitude_meters{2'048};
@@ -88,7 +101,7 @@ struct ConfigurationIdentity {
     std::string canonical_semantic_json;
     Sha256Digest builder_hash;
     Sha256Digest semantic_hash;
-    DatasetId dataset_id;
+    std::vector<DatasetId> dataset_ids;
 };
 
 [[nodiscard]] Result<BuilderConfiguration> load_configuration(

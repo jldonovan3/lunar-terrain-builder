@@ -10,6 +10,7 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <tuple>
 #include <numbers>
 #include <utility>
 #include <vector>
@@ -195,26 +196,38 @@ Result<ScanReport> scan_configuration(const BuilderConfiguration& configuration)
     if (!identity) {
         return Result<ScanReport>::failure(std::move(identity).error());
     }
+    std::size_t representative = 0;
+    if (configuration.source_kind == BuilderSourceKind::raster) {
+        for (std::size_t index = 1; index < configuration.rasters.size(); ++index) {
+            if (std::tuple{configuration.rasters[index].priority,
+                           identity.value().dataset_ids[index].value} <
+                std::tuple{configuration.rasters[representative].priority,
+                           identity.value().dataset_ids[representative].value}) {
+                representative = index;
+            }
+        }
+    }
     ScanReport report{
         configuration.database_name,
-        identity.value().dataset_id,
+        identity.value().dataset_ids[representative],
         configuration.source_kind == BuilderSourceKind::synthetic
-            ? configuration.synthetic_stable_key : configuration.raster->stable_key,
+            ? configuration.synthetic_stable_key : configuration.rasters[representative].stable_key,
         configuration.source_kind == BuilderSourceKind::synthetic
-            ? configuration.synthetic_source_uri : configuration.raster->source_uri,
+            ? configuration.synthetic_source_uri : configuration.rasters[representative].source_uri,
         identity.value().builder_hash,
         identity.value().semantic_hash,
     };
     if (configuration.source_kind == BuilderSourceKind::raster) {
-        auto source = open_raster_source(configuration, identity.value());
-        if (!source) {
-            return Result<ScanReport>::failure(std::move(source).error());
+        auto sources = open_raster_sources(configuration, identity.value());
+        if (!sources) {
+            return Result<ScanReport>::failure(std::move(sources).error());
         }
-        report.raster_details = source.value()->details();
-        report.artifact_members = source.value()->metadata().artifact_members;
-        report.artifact_bundle_bytes = source.value()->metadata().artifact_bundle_bytes;
-        report.artifact_bundle_sha256 = source.value()->metadata().artifact_bundle_hash;
-        const GeographicFootprint& footprint = source.value()->details().footprint;
+        const IRasterSource& source = *sources.value()[representative];
+        report.raster_details = source.details();
+        report.artifact_members = source.metadata().artifact_members;
+        report.artifact_bundle_bytes = source.metadata().artifact_bundle_bytes;
+        report.artifact_bundle_sha256 = source.metadata().artifact_bundle_hash;
+        const GeographicFootprint& footprint = source.details().footprint;
         double longitude = (footprint.west_longitude_degrees +
                             footprint.east_longitude_degrees) * 0.5;
         if (longitude > 180.0) {
@@ -222,7 +235,7 @@ Result<ScanReport> scan_configuration(const BuilderConfiguration& configuration)
         }
         const double latitude = (footprint.south_latitude_degrees +
                                  footprint.north_latitude_degrees) * 0.5;
-        auto sample = source.value()->Sample(LunarGeodeticCoordinate{
+        auto sample = source.Sample(LunarGeodeticCoordinate{
             latitude * std::numbers::pi_v<double> / 180.0,
             longitude * std::numbers::pi_v<double> / 180.0,
             0.0,
@@ -243,22 +256,35 @@ Result<PlanReport> plan_configuration(const BuilderConfiguration& configuration)
     if (!identity) {
         return Result<PlanReport>::failure(std::move(identity).error());
     }
-    auto source = open_raster_source(configuration, identity.value());
-    if (!source) {
-        return Result<PlanReport>::failure(std::move(source).error());
+    auto sources = open_raster_sources(configuration, identity.value());
+    if (!sources) {
+        return Result<PlanReport>::failure(std::move(sources).error());
     }
-    auto key = choose_raster_prototype_tile(*source.value(), configuration.maximum_level);
+    std::size_t target = 0;
+    for (std::size_t index = 1; index < configuration.rasters.size(); ++index) {
+        if (std::tuple{configuration.rasters[target].priority,
+                       identity.value().dataset_ids[target].value} <
+            std::tuple{configuration.rasters[index].priority,
+                       identity.value().dataset_ids[index].value}) {
+            target = index;
+        }
+    }
+    auto key = choose_raster_prototype_tile(
+        *sources.value()[target], configuration.maximum_level);
     if (!key) {
         return Result<PlanReport>::failure(std::move(key).error());
     }
     constexpr std::uint64_t elevation_bytes =
         std::uint64_t{format_v1::serialized_elevation_samples} *
         format_v1::serialized_elevation_samples * 2U;
-    constexpr std::uint64_t provenance_bytes =
-        format_v1::bytes::provenance_header + format_v1::bytes::provenance_palette_entry;
+    const std::uint64_t provenance_bytes =
+        format_v1::bytes::provenance_header +
+        configuration.rasters.size() * format_v1::bytes::provenance_palette_entry +
+        (configuration.rasters.size() > 1 ? 64U * 64U : 0U);
+    const std::uint64_t quality_bytes = configuration.rasters.size() > 1 ? 64U * 64U : 0U;
     return Result<PlanReport>::success(PlanReport{
         {key.value()},
-        elevation_bytes + provenance_bytes,
+        elevation_bytes + provenance_bytes + quality_bytes,
     });
 }
 

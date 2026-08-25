@@ -25,6 +25,7 @@
 #include <lunar/terrain/qsc_projection.hpp>
 
 #include "builder/builder.hpp"
+#include "builder/fusion.hpp"
 #include "builder/raster_source.hpp"
 
 namespace lunar::terrain::builder {
@@ -205,6 +206,68 @@ void write_radius_raster_without_metadata(
     return found == tile.channels().end() ? nullptr : &*found;
 }
 
+[[nodiscard]] std::string fusion_raster_entry(
+    const std::string_view stable_key,
+    const std::string_view raster_name,
+    const std::string_view role,
+    const std::string_view policy,
+    const int priority,
+    const double resolution,
+    const int width,
+    const int height) {
+    return "[[raster]]\n"
+           "stable_key = \"" + std::string{stable_key} + "\"\n"
+           "source_uri = \"fixture://" + std::string{stable_key} + "\"\n"
+           "product_name = \"M5 fusion fixture\"\n"
+           "producer = \"LunarTerrainBuilder tests\"\n"
+           "product_version = \"1\"\n"
+           "original_crs = \"Lunar geographic test CRS\"\n"
+           "license = \"Generated test data\"\n"
+           "raster_member = \"" + std::string{raster_name} + "\"\n"
+           "expected_data_type = \"Int16\"\n"
+           "artifact_members = [{ name = \"" + std::string{raster_name} + "\" }]\n"
+           "expected_width = " + std::to_string(width) + "\n"
+           "expected_height = " + std::to_string(height) + "\n"
+           "west_longitude_degrees = -2.0\n"
+           "east_longitude_degrees = 2.0\n"
+           "south_latitude_degrees = -2.0\n"
+           "north_latitude_degrees = 2.0\n"
+           "nominal_resolution_meters = " + std::to_string(resolution) + "\n"
+           "source_no_data = -32768.0\n"
+           "sample_scale = 0.5\n"
+           "sample_offset = 0.0\n"
+           "elevation_representation = \"elevation_meters\"\n"
+           "source_reference_radius_meters = 1737400.0\n"
+           "no_data_policy = \"error\"\n"
+           "metadata_override = false\n"
+           "role = \"" + std::string{role} + "\"\n" +
+           (policy.empty() ? std::string{} :
+               "fusion_policy = \"" + std::string{policy} + "\"\n") +
+           "priority = " + std::to_string(priority) + "\n\n";
+}
+
+[[nodiscard]] std::string fusion_configuration_text(
+    const std::filesystem::path& source_root,
+    const std::filesystem::path& output,
+    const bool reversed,
+    const int width,
+    const int height) {
+    const std::string base = fusion_raster_entry(
+        "generated.base.m5.v1", "base.tif", "base", "Replace",
+        100, 100.0, width, height);
+    const std::string fine = fusion_raster_entry(
+        "generated.fine.m5.v1", "fine.tif", "refinement", "",
+        200, 25.0, width, height);
+    return "[database]\n"
+           "name = \"GeneratedFusion\"\n"
+           "output_directory = \"" + path_text(output) + "\"\n"
+           "\n[tiles]\n"
+           "max_level = 8\n\n" +
+           (reversed ? fine + base : base + fine) +
+           "[local]\n"
+           "source_root = \"" + path_text(source_root) + "\"\n";
+}
+
 [[nodiscard]] std::uint16_t read_u16(
     const std::span<const std::byte> bytes,
     const std::size_t index) {
@@ -248,7 +311,7 @@ TEST_CASE("generated GDAL raster catalogs plans and builds deterministic P1 outp
     CHECK(first_identity.value().semantic_hash == second_identity.value().semantic_hash);
     CHECK(first_identity.value().canonical_builder_json.find(path_text(first_root)) == std::string::npos);
     BuilderConfiguration changed_provenance = first.value();
-    changed_provenance.raster->producer = "Changed producer";
+    changed_provenance.rasters.front().producer = "Changed producer";
     auto changed_identity = identify_configuration(changed_provenance);
     REQUIRE(changed_identity);
     CHECK(changed_identity.value().semantic_hash != first_identity.value().semantic_hash);
@@ -297,7 +360,8 @@ TEST_CASE("generated GDAL raster catalogs plans and builds deterministic P1 outp
     auto tile = database.value().ReadTile(key);
     REQUIRE(tile);
     REQUIRE(tile.value().provenance());
-    CHECK(tile.value().provenance()->palette.front().dataset_id == first_identity.value().dataset_id);
+    CHECK(tile.value().provenance()->palette.front().dataset_id ==
+          first_identity.value().dataset_ids.front());
     const DecodedChannel* elevation = elevation_channel(tile.value());
     REQUIRE(elevation != nullptr);
     auto u = QscProjection::LatticeCoordinate(key.x(), 128, key.level());
@@ -315,6 +379,99 @@ TEST_CASE("generated GDAL raster catalogs plans and builds deterministic P1 outp
     CHECK(read_u16(
         elevation->bytes(),
         center_stored * format_v1::serialized_elevation_samples + center_stored) == expected_code);
+}
+
+TEST_CASE("M5 overlapping rasters serialize deterministic provenance and quality") {
+    TemporaryDirectory temporary;
+    constexpr int width = 1'024;
+    constexpr int height = 1'024;
+    const auto source_root = temporary.path() / "fusion-source";
+    std::filesystem::create_directories(source_root);
+    write_integer_raster(source_root / "base.tif", width, height, false);
+    write_integer_raster(source_root / "fine.tif", width, height, true);
+
+    const auto first_path = temporary.path() / "fusion-first.toml";
+    const auto second_path = temporary.path() / "fusion-second.toml";
+    write_text(first_path, fusion_configuration_text(
+        source_root, temporary.path() / "fusion-output-a", false, width, height));
+    write_text(second_path, fusion_configuration_text(
+        source_root, temporary.path() / "fusion-output-b", true, width, height));
+    auto first = load_configuration(first_path);
+    auto second = load_configuration(second_path);
+    REQUIRE(first);
+    REQUIRE(second);
+    REQUIRE(first.value().rasters.size() == 2);
+    CHECK(first.value().rasters[1].fusion_policy == FusionPolicy::residual_refinement_v1);
+    auto first_identity = identify_configuration(first.value());
+    auto second_identity = identify_configuration(second.value());
+    REQUIRE(first_identity);
+    REQUIRE(second_identity);
+    CHECK(first_identity.value().builder_hash == second_identity.value().builder_hash);
+    CHECK(first_identity.value().semantic_hash == second_identity.value().semantic_hash);
+
+    auto first_build = build_configuration(first.value());
+    auto second_build = build_configuration(second.value());
+    REQUIRE(first_build);
+    REQUIRE(second_build);
+    CHECK(first_build.value().database_content_hash == second_build.value().database_content_hash);
+    CHECK(read_bytes(first_build.value().database_path) == read_bytes(second_build.value().database_path));
+    CHECK(read_bytes(first_build.value().packs.front().path) ==
+          read_bytes(second_build.value().packs.front().path));
+
+    auto database = LunarTerrainDatabase::Open(first_build.value().database_path);
+    REQUIRE(database);
+    CHECK(database.value().Header().dataset_count == 2);
+    auto plan = plan_configuration(first.value());
+    REQUIRE(plan);
+    auto tile = database.value().ReadTile(plan.value().tiles.front());
+    REQUIRE(tile);
+    REQUIRE(tile.value().provenance());
+    CHECK(tile.value().provenance()->palette.size() == 2);
+    CHECK(tile.value().provenance()->dominant_source_indices.size() == 64U * 64U);
+    double fraction_sum = 0.0;
+    for (const ProvenancePaletteEntry& entry : tile.value().provenance()->palette) {
+        fraction_sum += entry.contribution_fraction;
+    }
+    CHECK(std::abs(fraction_sum - 1.0) < 1.0e-6);
+    const auto quality = std::ranges::find_if(
+        tile.value().channels(),
+        [](const DecodedChannel& channel) { return channel.id() == ChannelId::quality; });
+    REQUIRE(quality != tile.value().channels().end());
+    CHECK(quality->width() == 64);
+    CHECK(quality->height() == 64);
+    CHECK(std::ranges::any_of(quality->bytes(), [](const std::byte value) {
+        return (std::to_integer<std::uint8_t>(value) & quality_fusion_transition) != 0;
+    }));
+    auto validation = validate_database(first_build.value().database_path, true);
+    REQUIRE(validation);
+
+    const auto provenance_path = temporary.path() / "provenance.ppm";
+    const auto quality_path = temporary.path() / "quality.ppm";
+    const auto transitions_path = temporary.path() / "transitions.csv";
+    REQUIRE(export_tile_diagnostic(
+        first_build.value().database_path,
+        plan.value().tiles.front(),
+        DiagnosticExportFormat::provenance_ppm,
+        provenance_path));
+    REQUIRE(export_tile_diagnostic(
+        first_build.value().database_path,
+        plan.value().tiles.front(),
+        DiagnosticExportFormat::quality_ppm,
+        quality_path));
+    REQUIRE(export_tile_diagnostic(
+        first_build.value().database_path,
+        plan.value().tiles.front(),
+        DiagnosticExportFormat::transition_csv,
+        transitions_path));
+    const auto provenance_bytes = read_bytes(provenance_path);
+    const auto quality_bytes = read_bytes(quality_path);
+    const auto transition_bytes = read_bytes(transitions_path);
+    CHECK(provenance_bytes.size() == 13U + 64U * 64U * 3U);
+    CHECK(quality_bytes.size() == 13U + 64U * 64U * 3U);
+    const std::string transition_text{
+        reinterpret_cast<const char*>(transition_bytes.data()), transition_bytes.size()};
+    CHECK(transition_text.find("first_dx_m") != std::string::npos);
+    CHECK(std::ranges::count(transition_text, '\n') > 1);
 }
 
 TEST_CASE("raster no-data policy is explicit and deterministic") {

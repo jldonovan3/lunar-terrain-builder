@@ -259,12 +259,12 @@ void append_domain(Bytes& bytes, const std::string_view value) {
 
 [[nodiscard]] Result<DatasetArtifact> make_dataset_artifact(
     const RasterConfiguration& configuration,
-    const ConfigurationIdentity& identity,
+    const DatasetId dataset_id,
     std::vector<ArtifactMember> members,
     const std::uint64_t bundle_bytes,
     const Sha256Digest bundle_hash) {
     DatasetArtifact dataset;
-    dataset.id = identity.dataset_id;
+    dataset.id = dataset_id;
     dataset.flags = 0x00000002U;
     if (configuration.elevation_representation == ElevationRepresentation::radius_meters) {
         dataset.flags |= 0x00000001U;
@@ -296,12 +296,23 @@ void append_domain(Bytes& bytes, const std::string_view value) {
         ? "{\"georeferencing\":\"configured_bounds\",\"no_data\":\"configuration\","
           "\"sample_offset\":\"configuration\",\"sample_scale\":\"configuration\"}"
         : "{}";
+    const std::string_view fusion_policy = [&configuration]() -> std::string_view {
+        switch (configuration.fusion_policy) {
+            case FusionPolicy::replace:
+                return "Replace";
+            case FusionPolicy::bias_corrected_replace:
+                return "BiasCorrectedReplace";
+            case FusionPolicy::residual_refinement_v1:
+                return "ResidualRefinement_v1";
+        }
+        return "Replace";
+    }();
     dataset.metadata_json = fmt::format(
         "{{\"artifact_members\":[{}],\"auxiliary_member\":{},\"data_type\":{},"
         "\"datum\":{{\"reference_radius_m\":1737400,\"source_reference_radius_m\":{}}},"
         "\"elevation_representation\":{},\"footprint\":{{\"east_longitude_degrees\":{},"
         "\"north_latitude_degrees\":{},\"south_latitude_degrees\":{},"
-        "\"west_longitude_degrees\":{}}},\"fusion_policy\":\"Replace\","
+        "\"west_longitude_degrees\":{}}},\"fusion_policy\":{},"
         "\"label_member\":{},\"metadata_overrides\":{},"
         "\"no_data\":{{\"policy\":{},\"sample_offset\":{},\"sample_scale\":{},\"value\":{}}},"
         "\"priority\":{},\"raster_member\":{},\"stable_key\":{}}}",
@@ -314,6 +325,7 @@ void append_domain(Bytes& bytes, const std::string_view value) {
         configuration.north_latitude_degrees,
         configuration.south_latitude_degrees,
         configuration.west_longitude_degrees,
+        json_string(fusion_policy),
         json_string(configuration.label_member),
         metadata_overrides,
         json_string(policy),
@@ -861,28 +873,88 @@ Result<std::vector<const IRasterSource*>> CoverageIndex::Covering(
 Result<std::unique_ptr<IRasterSource>> open_raster_source(
     const BuilderConfiguration& configuration,
     const ConfigurationIdentity& identity) {
-    if (configuration.source_kind != BuilderSourceKind::raster || !configuration.raster) {
+    if (configuration.source_kind != BuilderSourceKind::raster || configuration.rasters.size() != 1) {
         return failure<std::unique_ptr<IRasterSource>>(
             ErrorCode::invalid_argument, "configuration does not select a raster source");
     }
-    auto members = catalog_artifacts(*configuration.raster);
+    auto members = catalog_artifacts(configuration.rasters.front());
     if (!members) {
         return Result<std::unique_ptr<IRasterSource>>::failure(std::move(members).error());
     }
-    auto bundle = artifact_bundle_identity(members.value(), *configuration.raster);
+    auto bundle = artifact_bundle_identity(members.value(), configuration.rasters.front());
     if (!bundle) {
         return Result<std::unique_ptr<IRasterSource>>::failure(std::move(bundle).error());
     }
     auto dataset = make_dataset_artifact(
-        *configuration.raster,
-        identity,
+        configuration.rasters.front(),
+        identity.dataset_ids.front(),
         std::move(members).value(),
         bundle.value().first,
         bundle.value().second);
     if (!dataset) {
         return Result<std::unique_ptr<IRasterSource>>::failure(std::move(dataset).error());
     }
-    return GdalRasterSource::Open(*configuration.raster, std::move(dataset).value());
+    return GdalRasterSource::Open(configuration.rasters.front(), std::move(dataset).value());
+}
+
+Result<std::optional<RawTerrainSample>> IRasterSource::TrySample(
+    const LunarGeodeticCoordinate coordinate) const {
+    if (!Covers(coordinate)) {
+        return Result<std::optional<RawTerrainSample>>::success(std::nullopt);
+    }
+    auto sample = Sample(coordinate);
+    if (!sample) {
+        if (sample.error().code == ErrorCode::not_found ||
+            (sample.error().code == ErrorCode::invalid_argument &&
+             sample.error().message.find("no-data") != std::string::npos)) {
+            return Result<std::optional<RawTerrainSample>>::success(std::nullopt);
+        }
+        return Result<std::optional<RawTerrainSample>>::failure(std::move(sample).error());
+    }
+    return Result<std::optional<RawTerrainSample>>::success(std::move(sample).value());
+}
+
+Result<std::vector<std::unique_ptr<IRasterSource>>> open_raster_sources(
+    const BuilderConfiguration& configuration,
+    const ConfigurationIdentity& identity) {
+    if (configuration.source_kind != BuilderSourceKind::raster ||
+        configuration.rasters.empty() ||
+        configuration.rasters.size() != identity.dataset_ids.size()) {
+        return failure<std::vector<std::unique_ptr<IRasterSource>>>(
+            ErrorCode::invalid_argument, "configuration does not select valid raster sources");
+    }
+    std::vector<std::unique_ptr<IRasterSource>> sources;
+    sources.reserve(configuration.rasters.size());
+    for (std::size_t index = 0; index < configuration.rasters.size(); ++index) {
+        const RasterConfiguration& raster = configuration.rasters[index];
+        auto members = catalog_artifacts(raster);
+        if (!members) {
+            return Result<std::vector<std::unique_ptr<IRasterSource>>>::failure(
+                std::move(members).error());
+        }
+        auto bundle = artifact_bundle_identity(members.value(), raster);
+        if (!bundle) {
+            return Result<std::vector<std::unique_ptr<IRasterSource>>>::failure(
+                std::move(bundle).error());
+        }
+        auto dataset = make_dataset_artifact(
+            raster,
+            identity.dataset_ids[index],
+            std::move(members).value(),
+            bundle.value().first,
+            bundle.value().second);
+        if (!dataset) {
+            return Result<std::vector<std::unique_ptr<IRasterSource>>>::failure(
+                std::move(dataset).error());
+        }
+        auto source = GdalRasterSource::Open(raster, std::move(dataset).value());
+        if (!source) {
+            return Result<std::vector<std::unique_ptr<IRasterSource>>>::failure(
+                std::move(source).error());
+        }
+        sources.push_back(std::move(source).value());
+    }
+    return Result<std::vector<std::unique_ptr<IRasterSource>>>::success(std::move(sources));
 }
 
 Result<LunarTileKey> choose_raster_prototype_tile(

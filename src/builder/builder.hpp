@@ -71,6 +71,12 @@ struct InspectionReport {
     std::optional<std::uint8_t> channel_count;
 };
 
+enum class DiagnosticExportFormat : std::uint8_t {
+    provenance_ppm,
+    quality_ppm,
+    transition_csv,
+};
+
 [[nodiscard]] std::string_view version_string() noexcept;
 [[nodiscard]] Result<ScanReport> scan_configuration(const BuilderConfiguration& configuration);
 [[nodiscard]] Result<PlanReport> plan_configuration(const BuilderConfiguration& configuration);
@@ -84,6 +90,11 @@ struct InspectionReport {
 [[nodiscard]] Result<InspectionReport> inspect_database(
     const std::filesystem::path& path,
     std::optional<LunarTileKey> key);
+[[nodiscard]] Result<void> export_tile_diagnostic(
+    const std::filesystem::path& database_path,
+    LunarTileKey key,
+    DiagnosticExportFormat format,
+    const std::filesystem::path& output_path);
 
 [[nodiscard]] std::string format_report(const ScanReport& report, bool json);
 [[nodiscard]] std::string format_report(const PlanReport& report, bool json);

@@ -1,4 +1,4 @@
-# Lunar-Terrain-Builder Pipeline
+# Lunar Terrain Builder
 
 An offline toolchain for transforming heterogeneous lunar DEM products into a deterministic, fused, provenance-preserving canonical terrain database for ultimate conversion into Unreal Engine 5.8 mesh terrain.
 
@@ -7,10 +7,10 @@ Streaming (or packaging / compressing) a 1:1 full-scale, continuous, spherical M
 
 ## Overall Goals
 
-- scientific DEM data as authoritative macrogeometry
+- scientific DEM products as authoritative macrogeometry
 - QSC projection
-- fusion of heterogeneous DEM resolutions
-- deterministic procedural enhancement downstream from the scientific base
+- fusion of heterogeneous DEM resolutions from different products
+- deterministic procedural enhancement downstream from the scientific base (PCG in Unreal)
 - complete offline distribution
 - preservation of DEM provenance, and data attribution
 - Unreal Engine 5.8 mesh terrain as the intended terrain realization layer, rather than scientific storage formats
@@ -18,7 +18,6 @@ Streaming (or packaging / compressing) a 1:1 full-scale, continuous, spherical M
 ## Pipeline
 
 Four implementation units:
-
 
 ### `LunarTerrainCore` (M2 complete)
     Pure C++ data structures and algorithms
@@ -36,7 +35,7 @@ Four implementation units:
     fusion
     validation - test OBJ mesh tile
 
-#### `LunarTerrainBuilder` source data pathing
+#### `LunarTerrainBuilder` temp sythetic source data pathing
 
 The M2 synthetic P0 path is available through the committed
 `tests/data/synthetic_p0.toml` configuration:
@@ -49,13 +48,13 @@ lunar-terrain validate out/m2-synthetic/MoonSynthetic.ltdb --full --json
 lunar-terrain inspect out/m2-synthetic/MoonSynthetic.ltdb QSC/F0/L00/0000/0000 --json
 ```
 
-It publishes six deterministic level-zero QSC face packs and the LTDB manifest.
+`Builder` outputs six deterministic level-zero QSC face packs and the LTDB manifest.
 Generated `.ltdb`/`.ltp` outputs remain untracked build products.
 
 The M3 SLDEM2015 P1 path is configured by
 `tests/data/sldem2015_p1.toml`. It catalogs and verifies the pinned raster
 artifact bundle, applies explicit datum and no-data rules, selects a fully
-covered QSC tile, and publishes a deterministic v1 database through the same
+covered QSC tile, and publishes a deterministic database through the same
 Core reader path. Set `SLDEM2015_ROOT` to the provisioned artifact root, then
 run:
 
@@ -66,11 +65,9 @@ lunar-terrain plan tests/data/sldem2015_p1.toml --json
 lunar-terrain build tests/data/sldem2015_p1.toml --json
 ```
 
-Without `SLDEM2015_ROOT`, the external-data acceptance test is reported as
-skipped by the normal debug and release workflows. M4 multi-source fusion and
-seam work has not started.
+> Without `SLDEM2015_ROOT`, the external-data acceptance test is reported as skipped by the normal debug and release workflows. 
 
-### `LunarTerrainEditor`
+### `LunarTerrainEditor` (deferred)
     Unreal Engine 5.8 editor plugin
     reads .ltdb custom database
     constructs spherical Mesh Partition base geometry
@@ -78,7 +75,7 @@ seam work has not started.
     invokes deterministic geological PCG
     builds Mesh Terrain
 
-### `LunarTerrainRuntime`
+### `LunarTerrainRuntime` (deferred)
     Unreal runtime module
     lunar geographic coordinate types
     Moon-centered transforms

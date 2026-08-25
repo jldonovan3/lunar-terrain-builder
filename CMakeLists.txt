@@ -83,6 +83,9 @@ target_sources(
         src/builder/configuration.cpp
         src/builder/configuration.hpp
         src/builder/container_writer.cpp
+        src/builder/diagnostics.cpp
+        src/builder/fusion.cpp
+        src/builder/fusion.hpp
         src/builder/raster_source.cpp
         src/builder/raster_source.hpp
         src/builder/tile_staging.cpp
@@ -145,6 +148,7 @@ if(LUNAR_TERRAIN_BUILD_TESTING)
     add_executable(
         lunar_terrain_builder_tests
         tests/builder/builder_tests.cpp
+        tests/builder/fusion_tests.cpp
         tests/builder/projection_oracle_tests.cpp
         tests/builder/raster_source_tests.cpp
         tests/builder/tile_staging_tests.cpp

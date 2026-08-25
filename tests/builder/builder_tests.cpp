@@ -119,7 +119,7 @@ TEST_CASE("typed configuration excludes local execution settings from identity")
     REQUIRE(changed_identity);
     CHECK(first_identity.value().builder_hash == second_identity.value().builder_hash);
     CHECK(first_identity.value().semantic_hash == second_identity.value().semantic_hash);
-    CHECK(first_identity.value().dataset_id == second_identity.value().dataset_id);
+    CHECK(first_identity.value().dataset_ids == second_identity.value().dataset_ids);
     CHECK(first_identity.value().canonical_builder_json.find("output-a") == std::string::npos);
     CHECK(first_identity.value().canonical_builder_json.find("cache-a") == std::string::npos);
     CHECK(first_identity.value().canonical_semantic_json.find(

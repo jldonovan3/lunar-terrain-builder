@@ -38,6 +38,12 @@ struct FinalizedElevationTile {
     const std::filesystem::path& staging_directory,
     const ElevationSampler& sampler);
 
+[[nodiscard]] Result<StagedElevationTile> stage_elevation_tile_samples(
+    LunarTileKey key,
+    const Sha256Digest& dependency_hash,
+    const std::filesystem::path& staging_directory,
+    std::span<const double> samples);
+
 // Builds same-level adjacency from the supplied keys, collects deterministic
 // edge and corner patches, sorts them, and applies them once per receiver. The
 // lowest encoded TileKey owns every shared boundary value.

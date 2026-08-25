@@ -553,14 +553,31 @@ Result<StagedElevationTile> stage_elevation_tile(
         }
     }
 
+    return stage_elevation_tile_samples(key, dependency_hash, staging_directory, samples);
+}
+
+Result<StagedElevationTile> stage_elevation_tile_samples(
+    const LunarTileKey key,
+    const Sha256Digest& dependency_hash,
+    const std::filesystem::path& staging_directory,
+    const std::span<const double> samples) {
+    if (samples.size() != core_sample_count ||
+        std::ranges::any_of(samples, [](const double sample) { return !std::isfinite(sample); })) {
+        return failure<StagedElevationTile>(
+            ErrorCode::invalid_argument,
+            "staged tile core must contain 257x257 finite samples",
+            std::nullopt,
+            key);
+    }
+    std::vector<double> owned_samples(samples.begin(), samples.end());
     const std::filesystem::path path = artifact_path(staging_directory, key, dependency_hash);
-    const Bytes bytes = serialize_staged_core(key, dependency_hash, samples);
+    const Bytes bytes = serialize_staged_core(key, dependency_hash, owned_samples);
     auto persisted = persist_atomically(path, bytes, key);
     if (!persisted) {
         return Result<StagedElevationTile>::failure(std::move(persisted).error());
     }
     return Result<StagedElevationTile>::success(
-        StagedElevationTile{key, dependency_hash, std::move(samples), path});
+        StagedElevationTile{key, dependency_hash, std::move(owned_samples), path});
 }
 
 Result<void> resolve_elevation_boundaries(const std::span<StagedElevationTile> tiles) {
