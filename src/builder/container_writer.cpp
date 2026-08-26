@@ -1,5 +1,9 @@
 #include "builder/builder.hpp"
+#include "builder/build_cache.hpp"
 #include "builder/fusion.hpp"
+#include "builder/hierarchy.hpp"
+#include "builder/packing.hpp"
+#include "builder/task_executor.hpp"
 #include "builder/tile_staging.hpp"
 
 #include <algorithm>
@@ -78,10 +82,24 @@ struct EncodedTile {
     std::uint32_t payload_crc{};
     std::uint32_t logical_channel_bytes{};
     std::uint32_t effective_resolution_millimeters{};
+    std::uint32_t geometric_error_millimeters{};
     std::uint32_t flags{};
     DatasetId primary_dataset;
     std::uint16_t provenance_palette_count{};
+    std::uint8_t materialized_child_mask{};
     std::uint8_t channel_count{};
+};
+
+struct TileBuildResult {
+    std::vector<EncodedTile> tiles;
+    std::uint64_t built_tile_count{};
+    std::uint64_t reused_tile_count{};
+};
+
+struct PackTilePlacement {
+    std::size_t tile_index{};
+    std::uint64_t payload_offset{};
+    std::uint32_t payload_bytes{};
 };
 
 struct PackArtifact {
@@ -91,9 +109,7 @@ struct PackArtifact {
     Sha256Digest hash;
     LunarTileKey first_key;
     LunarTileKey last_key;
-    std::uint64_t payload_offset{};
-    std::uint32_t payload_bytes{};
-    std::size_t tile_index{};
+    std::vector<PackTilePlacement> placements;
 };
 
 struct ChunkArtifact {
@@ -101,6 +117,19 @@ struct ChunkArtifact {
     Bytes bytes;
     std::uint64_t file_offset{};
 };
+
+[[nodiscard]] std::filesystem::path encoded_tile_artifact_path(
+    const BuilderConfiguration& configuration,
+    LunarTileKey key,
+    const Sha256Digest& dependency_hash);
+[[nodiscard]] Result<void> persist_encoded_tile_artifact(
+    const std::filesystem::path& path,
+    const EncodedTile& tile);
+[[nodiscard]] Result<EncodedTile> load_encoded_tile_artifact(
+    const std::filesystem::path& path,
+    LunarTileKey expected_key,
+    const Sha256Digest& expected_dependency_hash,
+    const Sha256Digest& expected_content_hash);
 
 struct ZstdContextDeleter {
     void operator()(ZSTD_CCtx* context) const noexcept {
@@ -282,6 +311,7 @@ void append_domain(Bytes& bytes, const std::string_view domain) {
         "Generated test data",
     };
     dataset.nominal_resolution_meters = synthetic_resolution_meters;
+    dataset.effective_resolution_meters = synthetic_resolution_meters;
     dataset.horizontal_accuracy_meters = std::bit_cast<double>(0x7FF8000000000000ULL);
     dataset.vertical_accuracy_meters = std::bit_cast<double>(0x7FF8000000000000ULL);
     dataset.source_no_data = std::bit_cast<double>(0x7FF8000000000000ULL);
@@ -601,12 +631,18 @@ void append_domain(Bytes& bytes, const std::string_view domain) {
     const std::vector<std::uint16_t>& samples,
     const Sha256Digest& dependency_hash,
     const std::span<const DatasetArtifact> datasets,
-    const FusionTileSummary& summary) {
+    const FusionTileSummary& summary,
+    const double geometric_error_meters = 0.0,
+    const std::uint8_t materialized_child_mask = 0) {
     const auto primary = std::ranges::find_if(datasets, [&summary](const DatasetArtifact& dataset) {
         return dataset.id == summary.primary_dataset;
     });
     if (primary == datasets.end() || summary.palette.empty() ||
-        summary.palette.size() > std::numeric_limits<std::uint16_t>::max()) {
+        summary.palette.size() > std::numeric_limits<std::uint16_t>::max() ||
+        !std::isfinite(geometric_error_meters) || geometric_error_meters < 0.0 ||
+        geometric_error_meters * 1'000.0 >
+            static_cast<double>(std::numeric_limits<std::uint32_t>::max()) ||
+        (materialized_child_mask & 0xF0U) != 0) {
         return failure<EncodedTile>(
             ErrorCode::invalid_argument, "tile provenance does not resolve a primary dataset");
     }
@@ -698,8 +734,11 @@ void append_domain(Bytes& bytes, const std::string_view domain) {
     write_u8(payload, format_v1::tile_header_offset::apron, format_v1::apron_samples);
     write_u8(payload, format_v1::tile_header_offset::encoding_profile, static_cast<std::uint8_t>(EncodingProfile::global_u16));
     write_f32(payload, format_v1::tile_header_offset::effective_resolution,
-              static_cast<float>(primary->nominal_resolution_meters));
-    write_f32(payload, format_v1::tile_header_offset::geometric_error, 0.0F);
+              static_cast<float>(primary->effective_resolution_meters));
+    write_f32(
+        payload,
+        format_v1::tile_header_offset::geometric_error,
+        static_cast<float>(geometric_error_meters));
     write_f32(payload, format_v1::tile_header_offset::minimum_elevation, -16'384.0F + static_cast<float>(*minimum) * 0.5F);
     write_f32(payload, format_v1::tile_header_offset::maximum_elevation, -16'384.0F + static_cast<float>(*maximum) * 0.5F);
     write_u32(payload, format_v1::tile_header_offset::primary_dataset, summary.primary_dataset.value);
@@ -761,20 +800,24 @@ void append_domain(Bytes& bytes, const std::string_view domain) {
         content_hash.value(),
         0,
         static_cast<std::uint32_t>(logical_sum),
-        static_cast<std::uint32_t>(std::llround(primary->nominal_resolution_meters * 1'000.0)),
+        static_cast<std::uint32_t>(std::llround(primary->effective_resolution_meters * 1'000.0)),
+        static_cast<std::uint32_t>(std::llround(geometric_error_meters * 1'000.0)),
         tile_flags,
         summary.primary_dataset,
         static_cast<std::uint16_t>(summary.palette.size()),
+        materialized_child_mask,
         static_cast<std::uint8_t>(channels.size()),
     };
     encoded.payload_crc = crc32c(encoded.payload);
     return Result<EncodedTile>::success(std::move(encoded));
 }
 
-[[nodiscard]] Result<std::vector<EncodedTile>> build_tiles(
+[[nodiscard]] Result<TileBuildResult> build_tiles(
     const BuilderConfiguration& configuration,
     const ConfigurationIdentity& identity,
-    const DatasetArtifact& dataset) {
+    const DatasetArtifact& dataset,
+    BuildCache& cache,
+    const BuildOptions& options) {
     const ElevationSampler sampler = [&configuration](const QscCoordinate qsc) {
         auto coordinate = QscProjection::Inverse(qsc);
         if (!coordinate) {
@@ -784,76 +827,202 @@ void append_domain(Bytes& bytes, const std::string_view domain) {
             coordinate.value(), configuration.synthetic_amplitude_meters));
     };
 
-    std::vector<StagedElevationTile> staged;
-    staged.reserve(6);
+    std::vector<LunarTileKey> keys;
+    std::vector<Sha256Digest> dependencies;
+    keys.reserve(6);
+    dependencies.reserve(6);
     for (std::uint8_t face = 0; face < 6; ++face) {
         auto key = LunarTileKey::create(face, 0, 0, 0);
         if (!key) {
-            return Result<std::vector<EncodedTile>>::failure(std::move(key).error());
+            return Result<TileBuildResult>::failure(std::move(key).error());
         }
         const std::array datasets{dataset};
         const std::array<std::optional<Sha256Digest>, 1> windows{std::nullopt};
         auto dependency = tile_dependency_hash(
             key.value(), identity, datasets, windows, dataset.sampling_algorithm);
         if (!dependency) {
-            return Result<std::vector<EncodedTile>>::failure(std::move(dependency).error());
+            return Result<TileBuildResult>::failure(std::move(dependency).error());
         }
-        auto tile = stage_elevation_tile(
-            key.value(),
-            dependency.value(),
-            configuration.cache_directory / "staging",
-            sampler);
-        if (!tile) {
-            return Result<std::vector<EncodedTile>>::failure(std::move(tile).error());
+        keys.push_back(key.value());
+        dependencies.push_back(dependency.value());
+    }
+
+    std::vector<std::optional<StagedElevationTile>> staged_slots(keys.size());
+    std::vector<std::optional<CachedTileRecord>> reused_records(keys.size());
+    std::vector<std::optional<EncodedTile>> reused_tiles(keys.size());
+    std::vector<BuilderTask> tasks;
+    tasks.reserve(keys.size());
+    for (std::size_t index = 0; index < keys.size(); ++index) {
+        const std::filesystem::path expected_path = staged_elevation_artifact_path(
+            configuration.cache_directory / "staging", keys[index], dependencies[index]);
+        if (options.incremental) {
+            auto reusable = cache.FindReusableTile(keys[index], dependencies[index]);
+            if (!reusable) {
+                return Result<TileBuildResult>::failure(std::move(reusable).error());
+            }
+            if (reusable.value()) {
+                auto encoded = load_encoded_tile_artifact(
+                    reusable.value()->staging_path,
+                    keys[index],
+                    dependencies[index],
+                    reusable.value()->content_hash);
+                auto core = load_staged_elevation_tile(
+                    staged_elevation_artifact_path(
+                        configuration.cache_directory / "staging",
+                        keys[index],
+                        dependencies[index]),
+                    keys[index],
+                    dependencies[index]);
+                if (encoded && core) {
+                    staged_slots[index] = std::move(core).value();
+                    reused_tiles[index] = std::move(encoded).value();
+                    reused_records[index] = std::move(*reusable.value());
+                    continue;
+                }
+            }
         }
-        staged.push_back(std::move(tile).value());
+        auto marked = cache.MarkTileBuilding(keys[index], dependencies[index], expected_path);
+        if (!marked) {
+            return Result<TileBuildResult>::failure(std::move(marked).error());
+        }
+        tasks.emplace_back([&, index]() -> Result<void> {
+            auto staged = stage_elevation_tile(
+                keys[index],
+                dependencies[index],
+                configuration.cache_directory / "staging",
+                sampler);
+            if (!staged) {
+                return Result<void>::failure(std::move(staged).error());
+            }
+            staged_slots[index] = std::move(staged).value();
+            return Result<void>::success();
+        });
+    }
+    auto executed = run_bounded_tasks(tasks, configuration.worker_threads, options.cancellation);
+    if (!executed) {
+        return Result<TileBuildResult>::failure(std::move(executed).error());
+    }
+
+    std::vector<StagedElevationTile> staged;
+    staged.reserve(staged_slots.size());
+    for (std::optional<StagedElevationTile>& slot : staged_slots) {
+        if (!slot) {
+            return failure<TileBuildResult>(
+                ErrorCode::internal_error, "bounded tile task omitted a staged result");
+        }
+        staged.push_back(std::move(*slot));
     }
     auto resolved = resolve_elevation_boundaries(staged);
     if (!resolved) {
-        return Result<std::vector<EncodedTile>>::failure(std::move(resolved).error());
+        return Result<TileBuildResult>::failure(std::move(resolved).error());
     }
     auto finalized = finalize_elevation_tiles(staged, sampler);
     if (!finalized) {
-        return Result<std::vector<EncodedTile>>::failure(std::move(finalized).error());
+        return Result<TileBuildResult>::failure(std::move(finalized).error());
+    }
+    auto hierarchy = compute_hierarchy_metadata(finalized.value());
+    if (!hierarchy) {
+        return Result<TileBuildResult>::failure(std::move(hierarchy).error());
     }
 
-    std::vector<EncodedTile> tiles;
-    tiles.reserve(finalized.value().size());
+    TileBuildResult result;
+    result.tiles.reserve(finalized.value().size());
     const FusionTileSummary summary = single_source_summary(dataset);
-    for (const FinalizedElevationTile& elevation : finalized.value()) {
+    for (std::size_t index = 0; index < finalized.value().size(); ++index) {
+        const FinalizedElevationTile& elevation = finalized.value()[index];
         auto tile = encode_tile(
             elevation.key,
             elevation.serialized_samples,
             elevation.dependency_hash,
             std::span{&dataset, std::size_t{1}},
-            summary);
+            summary,
+            hierarchy.value()[index].geometric_error_meters,
+            hierarchy.value()[index].materialized_child_mask);
         if (!tile) {
-            return Result<std::vector<EncodedTile>>::failure(std::move(tile).error());
+            return Result<TileBuildResult>::failure(std::move(tile).error());
         }
-        tiles.push_back(std::move(tile).value());
+        if (reused_records[index]) {
+            if (reused_records[index]->content_hash != tile.value().content_hash ||
+                reused_tiles[index]->payload != tile.value().payload) {
+                return failure<TileBuildResult>(
+                    ErrorCode::hash_mismatch,
+                    "dependency-identical cached tile rebuilt to different content");
+            }
+            ++result.reused_tile_count;
+        } else {
+            const std::filesystem::path encoded_path = encoded_tile_artifact_path(
+                configuration, elevation.key, elevation.dependency_hash);
+            auto persisted = persist_encoded_tile_artifact(encoded_path, tile.value());
+            if (!persisted) {
+                return Result<TileBuildResult>::failure(std::move(persisted).error());
+            }
+            auto stored = cache.StoreCompletedTile(
+                elevation.key,
+                elevation.dependency_hash,
+                tile.value().content_hash,
+                encoded_path);
+            if (!stored) {
+                return Result<TileBuildResult>::failure(std::move(stored).error());
+            }
+            ++result.built_tile_count;
+        }
+        result.tiles.push_back(std::move(tile).value());
     }
-    return Result<std::vector<EncodedTile>>::success(std::move(tiles));
+    return Result<TileBuildResult>::success(std::move(result));
 }
 
 [[nodiscard]] Result<std::vector<PackArtifact>> build_packs(
     const BuilderConfiguration& configuration,
     const DatabaseId& database_id,
     const std::vector<EncodedTile>& tiles) {
+    if (tiles.empty() || !std::ranges::is_sorted(tiles, {}, [](const EncodedTile& tile) {
+            return tile.key;
+        })) {
+        return failure<std::vector<PackArtifact>>(
+            ErrorCode::invalid_argument, "canonical packing requires nonempty sorted tiles");
+    }
     std::vector<PackArtifact> packs;
     packs.reserve(tiles.size());
     const std::string id_hex = database_id_hex(database_id);
-    for (std::size_t index = 0; index < tiles.size(); ++index) {
-        const EncodedTile& tile = tiles[index];
+    std::vector<PackingTile> packing_tiles;
+    packing_tiles.reserve(tiles.size());
+    for (const EncodedTile& tile : tiles) {
+        packing_tiles.push_back(PackingTile{tile.key, tile.payload.size()});
+    }
+    auto ranges = plan_canonical_pack_ranges(packing_tiles, configuration.target_pack_bytes);
+    if (!ranges) {
+        return Result<std::vector<PackArtifact>>::failure(std::move(ranges).error());
+    }
+    for (const CanonicalPackRange range : ranges.value()) {
+        const std::uint32_t pack_number = static_cast<std::uint32_t>(packs.size());
+        const std::uint8_t face = tiles[range.first_tile].key.face();
+        const std::uint8_t level = tiles[range.first_tile].key.level();
         Bytes bytes(format_v1::bytes::pack_header);
-        const std::uint64_t payload_offset = bytes.size();
-        append_bytes(bytes, tile.payload);
+        std::vector<PackTilePlacement> placements;
+        placements.reserve(range.tile_count);
+        for (std::size_t tile_index = range.first_tile;
+             tile_index < range.first_tile + range.tile_count;
+             ++tile_index) {
+            const EncodedTile& tile = tiles[tile_index];
+            const std::uint64_t payload_offset = align8(bytes.size());
+            append_zeroes(
+                bytes, static_cast<std::size_t>(payload_offset - bytes.size()));
+            append_bytes(bytes, tile.payload);
+            placements.push_back(PackTilePlacement{
+                tile_index,
+                payload_offset,
+                static_cast<std::uint32_t>(tile.payload.size()),
+            });
+        }
+        const LunarTileKey first_key = tiles[placements.front().tile_index].key;
+        const LunarTileKey last_key = tiles[placements.back().tile_index].key;
         write_text(bytes, format_v1::pack_header_offset::magic, "LTPK");
         write_u16(bytes, format_v1::pack_header_offset::major, format_v1::major_version);
         write_u16(bytes, format_v1::pack_header_offset::minor, format_v1::minor_version);
         write_u32(bytes, format_v1::pack_header_offset::header_bytes, format_v1::bytes::pack_header);
         write_u32(bytes, format_v1::pack_header_offset::endian, format_v1::endian_tag);
-        write_u32(bytes, format_v1::pack_header_offset::pack_id, static_cast<std::uint32_t>(index));
-        write_u64(bytes, format_v1::pack_header_offset::tile_count, 1);
+        write_u32(bytes, format_v1::pack_header_offset::pack_id, pack_number);
+        write_u64(bytes, format_v1::pack_header_offset::tile_count, placements.size());
         write_u64(bytes, format_v1::pack_header_offset::payload_region_offset, format_v1::bytes::pack_header);
         write_u64(bytes, format_v1::pack_header_offset::file_bytes, bytes.size());
         auto pack_hash = sha256(bytes);
@@ -865,19 +1034,17 @@ void append_domain(Bytes& bytes, const std::string_view domain) {
             "Packs/{}_{}_F{}_L{:02}_P{:04}.ltp",
             configuration.database_name,
             id_hex,
-            tile.key.face(),
-            tile.key.level(),
-            index);
+            face,
+            level,
+            pack_number);
         packs.push_back(PackArtifact{
-            PackId{static_cast<std::uint32_t>(index)},
+            PackId{pack_number},
             relative_path,
             std::move(bytes),
             pack_hash.value(),
-            tile.key,
-            tile.key,
-            payload_offset,
-            static_cast<std::uint32_t>(tile.payload.size()),
-            index,
+            first_key,
+            last_key,
+            std::move(placements),
         });
     }
     return Result<std::vector<PackArtifact>>::success(std::move(packs));
@@ -994,7 +1161,10 @@ struct StringTable {
         write_u32(bytes, offset + format_v1::pack_record_offset::path_string_id,
                   strings.offsets.at(pack.relative_path.generic_string()));
         write_u16(bytes, offset + format_v1::pack_record_offset::default_codec, static_cast<std::uint16_t>(Codec::zstandard));
-        write_u64(bytes, offset + format_v1::pack_record_offset::tile_count, 1);
+        write_u64(
+            bytes,
+            offset + format_v1::pack_record_offset::tile_count,
+            pack.placements.size());
         write_u64(bytes, offset + format_v1::pack_record_offset::file_bytes, pack.bytes.size());
         write_u64(bytes, offset + format_v1::pack_record_offset::first_tile_key, pack.first_key.encoded());
         write_u64(bytes, offset + format_v1::pack_record_offset::last_tile_key, pack.last_key.encoded());
@@ -1007,29 +1177,40 @@ struct StringTable {
     const std::vector<PackArtifact>& packs,
     const std::vector<EncodedTile>& tiles) {
     Bytes bytes(tiles.size() * format_v1::bytes::tile_index_record);
-    for (std::size_t index = 0; index < tiles.size(); ++index) {
-        const EncodedTile& tile = tiles[index];
-        const PackArtifact& pack = packs[index];
-        const std::size_t offset = index * format_v1::bytes::tile_index_record;
-        write_u64(bytes, offset + format_v1::tile_index_offset::tile_key, tile.key.encoded());
-        write_u32(bytes, offset + format_v1::tile_index_offset::pack_id, pack.id.value);
-        write_u32(bytes, offset + format_v1::tile_index_offset::flags, tile.flags);
-        write_u64(bytes, offset + format_v1::tile_index_offset::payload_offset, pack.payload_offset);
-        write_u32(bytes, offset + format_v1::tile_index_offset::stored_bytes, pack.payload_bytes);
-        write_u32(bytes, offset + format_v1::tile_index_offset::logical_bytes, tile.logical_channel_bytes);
-        write_u16(bytes, offset + format_v1::tile_index_offset::minimum_elevation, tile.minimum_code);
-        write_u16(bytes, offset + format_v1::tile_index_offset::maximum_elevation, tile.maximum_code);
-        write_u32(
-            bytes,
-            offset + format_v1::tile_index_offset::primary_dataset,
-            tile.primary_dataset.value);
-        write_u32(bytes, offset + format_v1::tile_index_offset::effective_resolution,
-                  tile.effective_resolution_millimeters);
-        write_u32(bytes, offset + format_v1::tile_index_offset::geometric_error, 0);
-        write_u8(bytes, offset + format_v1::tile_index_offset::channel_count, tile.channel_count);
-        write_u32(bytes, offset + format_v1::tile_index_offset::payload_crc32c, tile.payload_crc);
-        write_bytes(bytes, offset + format_v1::tile_index_offset::content_hash, ByteView{tile.content_hash.bytes}.first<16>());
-        write_bytes(bytes, offset + format_v1::tile_index_offset::dependency_hash, ByteView{tile.dependency_hash.bytes}.first<8>());
+    for (const PackArtifact& pack : packs) {
+        for (const PackTilePlacement& placement : pack.placements) {
+            const EncodedTile& tile = tiles[placement.tile_index];
+            const std::size_t offset =
+                placement.tile_index * format_v1::bytes::tile_index_record;
+            write_u64(bytes, offset + format_v1::tile_index_offset::tile_key, tile.key.encoded());
+            write_u32(bytes, offset + format_v1::tile_index_offset::pack_id, pack.id.value);
+            write_u32(bytes, offset + format_v1::tile_index_offset::flags, tile.flags);
+            write_u64(
+                bytes,
+                offset + format_v1::tile_index_offset::payload_offset,
+                placement.payload_offset);
+            write_u32(
+                bytes,
+                offset + format_v1::tile_index_offset::stored_bytes,
+                placement.payload_bytes);
+            write_u32(bytes, offset + format_v1::tile_index_offset::logical_bytes, tile.logical_channel_bytes);
+            write_u16(bytes, offset + format_v1::tile_index_offset::minimum_elevation, tile.minimum_code);
+            write_u16(bytes, offset + format_v1::tile_index_offset::maximum_elevation, tile.maximum_code);
+            write_u32(
+                bytes,
+                offset + format_v1::tile_index_offset::primary_dataset,
+                tile.primary_dataset.value);
+            write_u32(bytes, offset + format_v1::tile_index_offset::effective_resolution,
+                      tile.effective_resolution_millimeters);
+            write_u32(bytes, offset + format_v1::tile_index_offset::geometric_error,
+                      tile.geometric_error_millimeters);
+            write_u8(bytes, offset + format_v1::tile_index_offset::child_mask,
+                     tile.materialized_child_mask);
+            write_u8(bytes, offset + format_v1::tile_index_offset::channel_count, tile.channel_count);
+            write_u32(bytes, offset + format_v1::tile_index_offset::payload_crc32c, tile.payload_crc);
+            write_bytes(bytes, offset + format_v1::tile_index_offset::content_hash, ByteView{tile.content_hash.bytes}.first<16>());
+            write_bytes(bytes, offset + format_v1::tile_index_offset::dependency_hash, ByteView{tile.dependency_hash.bytes}.first<8>());
+        }
     }
     return bytes;
 }
@@ -1234,6 +1415,196 @@ struct StringTable {
     return Result<Bytes>::success(std::move(bytes));
 }
 
+[[nodiscard]] std::uint16_t read_le_u16(
+    const ByteView bytes,
+    const std::size_t offset) noexcept {
+    return static_cast<std::uint16_t>(
+        std::to_integer<std::uint16_t>(bytes[offset]) |
+        (std::to_integer<std::uint16_t>(bytes[offset + 1U]) << 8U));
+}
+
+[[nodiscard]] std::uint32_t read_le_u32(
+    const ByteView bytes,
+    const std::size_t offset) noexcept {
+    std::uint32_t value = 0;
+    for (std::uint32_t index = 0; index < 4U; ++index) {
+        value |= std::to_integer<std::uint32_t>(bytes[offset + index]) << (index * 8U);
+    }
+    return value;
+}
+
+[[nodiscard]] std::uint64_t read_le_u64(
+    const ByteView bytes,
+    const std::size_t offset) noexcept {
+    std::uint64_t value = 0;
+    for (std::uint32_t index = 0; index < 8U; ++index) {
+        value |= std::to_integer<std::uint64_t>(bytes[offset + index]) << (index * 8U);
+    }
+    return value;
+}
+
+std::filesystem::path encoded_tile_artifact_path(
+    const BuilderConfiguration& configuration,
+    const LunarTileKey key,
+    const Sha256Digest& dependency_hash) {
+    return configuration.cache_directory / "staging" / fmt::format(
+        "{:016x}-{}.tile-v2", key.encoded(), dependency_hash.to_hex());
+}
+
+Result<void> persist_encoded_tile_artifact(
+    const std::filesystem::path& path,
+    const EncodedTile& tile) {
+    constexpr std::size_t header_bytes = 120;
+    Bytes bytes(header_bytes);
+    write_text(bytes, 0, "LTET");
+    write_u16(bytes, 4, 2);
+    write_u64(bytes, 8, tile.key.encoded());
+    write_bytes(bytes, 16, tile.dependency_hash.bytes);
+    write_bytes(bytes, 48, tile.content_hash.bytes);
+    write_u16(bytes, 80, tile.minimum_code);
+    write_u16(bytes, 82, tile.maximum_code);
+    write_u32(bytes, 84, tile.payload_crc);
+    write_u32(bytes, 88, tile.logical_channel_bytes);
+    write_u32(bytes, 92, tile.effective_resolution_millimeters);
+    write_u32(bytes, 96, tile.geometric_error_millimeters);
+    write_u32(bytes, 100, tile.flags);
+    write_u32(bytes, 104, tile.primary_dataset.value);
+    write_u16(bytes, 108, tile.provenance_palette_count);
+    write_u8(bytes, 110, tile.materialized_child_mask);
+    write_u8(bytes, 111, tile.channel_count);
+    write_u32(bytes, 112, static_cast<std::uint32_t>(tile.payload.size()));
+    append_bytes(bytes, tile.payload);
+    write_u32(bytes, 116, crc32c(bytes));
+
+    std::error_code filesystem_error;
+    std::filesystem::create_directories(path.parent_path(), filesystem_error);
+    if (filesystem_error) {
+        return Result<void>::failure(build_error(
+            ErrorCode::io_error,
+            fmt::format("could not create encoded-tile staging directory: {}",
+                        filesystem_error.message()),
+            path.parent_path()));
+    }
+    const bool exists = std::filesystem::exists(path, filesystem_error);
+    if (filesystem_error) {
+        return Result<void>::failure(build_error(
+            ErrorCode::io_error,
+            fmt::format("could not inspect encoded-tile staging artifact: {}",
+                        filesystem_error.message()),
+            path).with_tile_key(tile.key.encoded()));
+    }
+    if (exists) {
+        auto existing = read_file(path);
+        if (!existing) {
+            return Result<void>::failure(std::move(existing).error());
+        }
+        if (existing.value() == bytes) {
+            return Result<void>::success();
+        }
+        return Result<void>::failure(build_error(
+            ErrorCode::hash_mismatch,
+            "dependency-identical encoded tile staging artifact has different bytes",
+            path).with_tile_key(tile.key.encoded()));
+    }
+    const std::filesystem::path temporary =
+        path.parent_path() / ("." + path.filename().string() + ".tmp");
+    auto written = write_file_synced(temporary, bytes);
+    if (!written) {
+        return written;
+    }
+    std::filesystem::rename(temporary, path, filesystem_error);
+    if (filesystem_error) {
+        const std::string rename_message = filesystem_error.message();
+        std::error_code remove_error;
+        std::filesystem::remove(temporary, remove_error);
+        return Result<void>::failure(build_error(
+            ErrorCode::io_error,
+            fmt::format("could not publish encoded-tile staging artifact: {}",
+                        rename_message),
+            path).with_tile_key(tile.key.encoded()));
+    }
+    return Result<void>::success();
+}
+
+Result<EncodedTile> load_encoded_tile_artifact(
+    const std::filesystem::path& path,
+    const LunarTileKey expected_key,
+    const Sha256Digest& expected_dependency_hash,
+    const Sha256Digest& expected_content_hash) {
+    constexpr std::size_t header_bytes = 120;
+    auto file = read_file(path);
+    if (!file) {
+        return Result<EncodedTile>::failure(std::move(file).error());
+    }
+    const ByteView bytes = file.value();
+    if (bytes.size() < header_bytes ||
+        std::string_view{reinterpret_cast<const char*>(bytes.data()), 4} != "LTET" ||
+        read_le_u16(bytes, 4) != 2 || read_le_u16(bytes, 6) != 0 ||
+        read_le_u64(bytes, 8) != expected_key.encoded() ||
+        !std::ranges::equal(
+            bytes.subspan(16, expected_dependency_hash.bytes.size()),
+            expected_dependency_hash.bytes) ||
+        !std::ranges::equal(
+            bytes.subspan(48, expected_content_hash.bytes.size()),
+            expected_content_hash.bytes)) {
+        return failure<EncodedTile>(
+            ErrorCode::hash_mismatch,
+            "encoded tile staging identity does not match the requested cache row",
+            path);
+    }
+    const std::uint32_t artifact_crc = read_le_u32(bytes, 116);
+    Bytes checksum_bytes = file.value();
+    write_u32(checksum_bytes, 116, 0);
+    if (crc32c(checksum_bytes) != artifact_crc) {
+        return failure<EncodedTile>(
+            ErrorCode::checksum_mismatch,
+            "encoded tile staging artifact CRC does not match",
+            path);
+    }
+    const std::uint32_t payload_bytes = read_le_u32(bytes, 112);
+    if (payload_bytes < format_v1::bytes::tile_header ||
+        bytes.size() != header_bytes + std::size_t{payload_bytes}) {
+        return failure<EncodedTile>(
+            ErrorCode::invalid_format, "encoded tile staging payload size is invalid", path);
+    }
+    Bytes payload(bytes.begin() + static_cast<std::ptrdiff_t>(header_bytes), bytes.end());
+    const std::uint32_t payload_crc = read_le_u32(bytes, 84);
+    const ByteView payload_view = payload;
+    if (crc32c(payload) != payload_crc ||
+        std::string_view{reinterpret_cast<const char*>(payload.data()), 4} != "LTIL" ||
+        read_le_u64(payload_view, format_v1::tile_header_offset::tile_key) !=
+            expected_key.encoded() ||
+        !std::ranges::equal(
+            payload_view.subspan(
+                format_v1::tile_header_offset::dependency_hash, 16),
+            ByteView{expected_dependency_hash.bytes}.first<16>()) ||
+        !std::ranges::equal(
+            payload_view.subspan(format_v1::tile_header_offset::content_hash, 16),
+            ByteView{expected_content_hash.bytes}.first<16>())) {
+        return failure<EncodedTile>(
+            ErrorCode::checksum_mismatch,
+            "encoded tile staging payload failed identity or CRC validation",
+            path);
+    }
+    return Result<EncodedTile>::success(EncodedTile{
+        expected_key,
+        std::move(payload),
+        read_le_u16(bytes, 80),
+        read_le_u16(bytes, 82),
+        expected_dependency_hash,
+        expected_content_hash,
+        payload_crc,
+        read_le_u32(bytes, 88),
+        read_le_u32(bytes, 92),
+        read_le_u32(bytes, 96),
+        read_le_u32(bytes, 100),
+        DatasetId{read_le_u32(bytes, 104)},
+        read_le_u16(bytes, 108),
+        static_cast<std::uint8_t>(std::to_integer<std::uint8_t>(bytes[110])),
+        static_cast<std::uint8_t>(std::to_integer<std::uint8_t>(bytes[111])),
+    });
+}
+
 [[nodiscard]] std::filesystem::path temporary_sibling(const std::filesystem::path& final_path) {
     return final_path.parent_path() / ("." + final_path.filename().string() + ".tmp");
 }
@@ -1375,14 +1746,16 @@ void remove_if_present(const std::filesystem::path& path) noexcept {
     return Result<void>::success();
 }
 
-[[nodiscard]] Result<std::vector<EncodedTile>> build_raster_tiles(
+[[nodiscard]] Result<TileBuildResult> build_raster_tiles(
     const BuilderConfiguration& configuration,
     const ConfigurationIdentity& identity,
     const std::span<const IRasterSource* const> sources,
-    const std::span<const DatasetArtifact> datasets) {
+    const std::span<const DatasetArtifact> datasets,
+    BuildCache& cache,
+    const BuildOptions& options) {
     if (sources.empty() || sources.size() != configuration.rasters.size() ||
         sources.size() != datasets.size()) {
-        return failure<std::vector<EncodedTile>>(
+        return failure<TileBuildResult>(
             ErrorCode::invalid_argument, "raster fusion sources are inconsistent");
     }
     std::vector<std::size_t> source_order(sources.size());
@@ -1391,10 +1764,17 @@ void remove_if_present(const std::filesystem::path& path) noexcept {
         return std::tuple{configuration.rasters[index].priority, datasets[index].id.value};
     });
     const std::size_t target_source = source_order.back();
+    auto target_level = choose_source_level(
+        sources[target_source]->details().footprint,
+        datasets[target_source].effective_resolution_meters,
+        configuration.maximum_level);
+    if (!target_level) {
+        return Result<TileBuildResult>::failure(std::move(target_level).error());
+    }
     auto key = choose_raster_prototype_tile(
-        *sources[target_source], configuration.maximum_level);
+        *sources[target_source], target_level.value());
     if (!key) {
-        return Result<std::vector<EncodedTile>>::failure(std::move(key).error());
+        return Result<TileBuildResult>::failure(std::move(key).error());
     }
 
     std::vector<std::optional<Sha256Digest>> window_dependencies;
@@ -1402,21 +1782,52 @@ void remove_if_present(const std::filesystem::path& path) noexcept {
     for (const IRasterSource* source : sources) {
         auto window = source->WindowDependency(key.value());
         if (!window) {
-            return Result<std::vector<EncodedTile>>::failure(std::move(window).error());
+            return Result<TileBuildResult>::failure(std::move(window).error());
         }
         window_dependencies.push_back(window.value());
     }
     auto dependency = tile_dependency_hash(
         key.value(), identity, datasets, window_dependencies, "heterogeneous_fusion_v1");
     if (!dependency) {
-        return Result<std::vector<EncodedTile>>::failure(std::move(dependency).error());
+        return Result<TileBuildResult>::failure(std::move(dependency).error());
+    }
+
+    const std::filesystem::path encoded_path = encoded_tile_artifact_path(
+        configuration, key.value(), dependency.value());
+    if (options.incremental) {
+        auto reusable = cache.FindReusableTile(key.value(), dependency.value());
+        if (!reusable) {
+            return Result<TileBuildResult>::failure(std::move(reusable).error());
+        }
+        if (reusable.value()) {
+            auto encoded = load_encoded_tile_artifact(
+                reusable.value()->staging_path,
+                key.value(),
+                dependency.value(),
+                reusable.value()->content_hash);
+            if (encoded) {
+                TileBuildResult result;
+                result.tiles.push_back(std::move(encoded).value());
+                result.reused_tile_count = 1;
+                return Result<TileBuildResult>::success(std::move(result));
+            }
+        }
+    }
+    auto marked = cache.MarkTileBuilding(key.value(), dependency.value(), encoded_path);
+    if (!marked) {
+        return Result<TileBuildResult>::failure(std::move(marked).error());
+    }
+    if (options.cancellation.stop_requested()) {
+        return Result<TileBuildResult>::failure(Error{
+            ErrorCode::cancelled, "terrain build was cancelled"}
+            .with_tile_key(key.value().encoded()));
     }
 
     double coarsest_resolution = 0.0;
     double finest_resolution = std::numeric_limits<double>::infinity();
     for (const DatasetArtifact& dataset : datasets) {
-        coarsest_resolution = std::max(coarsest_resolution, dataset.nominal_resolution_meters);
-        finest_resolution = std::min(finest_resolution, dataset.nominal_resolution_meters);
+        coarsest_resolution = std::max(coarsest_resolution, dataset.effective_resolution_meters);
+        finest_resolution = std::min(finest_resolution, dataset.effective_resolution_meters);
     }
     const std::uint32_t maximum_passes = residual_filter_pass_count(
         coarsest_resolution, finest_resolution);
@@ -1432,7 +1843,7 @@ void remove_if_present(const std::filesystem::path& path) noexcept {
     if (first_x < 0 || first_y < 0 ||
         first_x + grid_width - 1 > static_cast<std::int64_t>(cells_per_axis) ||
         first_y + grid_height - 1 > static_cast<std::int64_t>(cells_per_axis)) {
-        return failure<std::vector<EncodedTile>>(
+        return failure<TileBuildResult>(
             ErrorCode::unsupported_feature,
             "M5 prototype fusion halo crosses a cube-face boundary");
     }
@@ -1440,6 +1851,11 @@ void remove_if_present(const std::filesystem::path& path) noexcept {
     std::vector<FusionGridSource> fusion_sources;
     fusion_sources.reserve(sources.size());
     for (std::size_t source_index = 0; source_index < sources.size(); ++source_index) {
+        if (options.cancellation.stop_requested()) {
+            return Result<TileBuildResult>::failure(Error{
+                ErrorCode::cancelled, "terrain build was cancelled"}
+                .with_tile_key(key.value().encoded()));
+        }
         FusionGridSource fusion_source;
         fusion_source.dataset_id = datasets[source_index].id;
         fusion_source.priority = configuration.rasters[source_index].priority;
@@ -1450,6 +1866,11 @@ void remove_if_present(const std::filesystem::path& path) noexcept {
         fusion_source.samples.resize(std::size_t{grid_width} * grid_height);
         fusion_source.quality.assign(fusion_source.samples.size(), 0);
         for (std::uint32_t y = 0; y < grid_height; ++y) {
+            if (options.cancellation.stop_requested()) {
+                return Result<TileBuildResult>::failure(Error{
+                    ErrorCode::cancelled, "terrain build was cancelled"}
+                    .with_tile_key(key.value().encoded()));
+            }
             for (std::uint32_t x = 0; x < grid_width; ++x) {
                 const double u = (
                     2.0 * static_cast<double>(first_x + x) -
@@ -1462,12 +1883,12 @@ void remove_if_present(const std::filesystem::path& path) noexcept {
                 auto coordinate = QscProjection::Inverse(QscCoordinate{
                     static_cast<QscFace>(key.value().face()), u, v, 0.0});
                 if (!coordinate) {
-                    return Result<std::vector<EncodedTile>>::failure(
+                    return Result<TileBuildResult>::failure(
                         std::move(coordinate).error());
                 }
                 auto sample = sources[source_index]->TrySample(coordinate.value());
                 if (!sample) {
-                    return Result<std::vector<EncodedTile>>::failure(std::move(sample).error());
+                    return Result<TileBuildResult>::failure(std::move(sample).error());
                 }
                 if (!sample.value()) {
                     continue;
@@ -1488,11 +1909,11 @@ void remove_if_present(const std::filesystem::path& path) noexcept {
     if (!fused) {
         Error error = std::move(fused).error();
         error.with_tile_key(key.value().encoded());
-        return Result<std::vector<EncodedTile>>::failure(std::move(error));
+        return Result<TileBuildResult>::failure(std::move(error));
     }
     auto summary = summarize_fused_core(fused.value(), halo, halo);
     if (!summary) {
-        return Result<std::vector<EncodedTile>>::failure(std::move(summary).error());
+        return Result<TileBuildResult>::failure(std::move(summary).error());
     }
     std::vector<double> core_samples;
     core_samples.reserve(
@@ -1531,17 +1952,17 @@ void remove_if_present(const std::filesystem::path& path) noexcept {
         configuration.cache_directory / "staging",
         core_samples);
     if (!staged) {
-        return Result<std::vector<EncodedTile>>::failure(std::move(staged).error());
+        return Result<TileBuildResult>::failure(std::move(staged).error());
     }
     std::vector<StagedElevationTile> staged_tiles;
     staged_tiles.push_back(std::move(staged).value());
     auto resolved = resolve_elevation_boundaries(staged_tiles);
     if (!resolved) {
-        return Result<std::vector<EncodedTile>>::failure(std::move(resolved).error());
+        return Result<TileBuildResult>::failure(std::move(resolved).error());
     }
     auto finalized = finalize_elevation_tiles(staged_tiles, sampler);
     if (!finalized) {
-        return Result<std::vector<EncodedTile>>::failure(std::move(finalized).error());
+        return Result<TileBuildResult>::failure(std::move(finalized).error());
     }
     auto tile = encode_tile(
         key.value(),
@@ -1550,11 +1971,21 @@ void remove_if_present(const std::filesystem::path& path) noexcept {
         datasets,
         summary.value());
     if (!tile) {
-        return Result<std::vector<EncodedTile>>::failure(std::move(tile).error());
+        return Result<TileBuildResult>::failure(std::move(tile).error());
     }
-    std::vector<EncodedTile> tiles;
-    tiles.push_back(std::move(tile).value());
-    return Result<std::vector<EncodedTile>>::success(std::move(tiles));
+    auto persisted = persist_encoded_tile_artifact(encoded_path, tile.value());
+    if (!persisted) {
+        return Result<TileBuildResult>::failure(std::move(persisted).error());
+    }
+    auto stored = cache.StoreCompletedTile(
+        key.value(), dependency.value(), tile.value().content_hash, encoded_path);
+    if (!stored) {
+        return Result<TileBuildResult>::failure(std::move(stored).error());
+    }
+    TileBuildResult result;
+    result.tiles.push_back(std::move(tile).value());
+    result.built_tile_count = 1;
+    return Result<TileBuildResult>::success(std::move(result));
 }
 
 [[nodiscard]] Result<BuildReport> publish_build(
@@ -1563,7 +1994,10 @@ void remove_if_present(const std::filesystem::path& path) noexcept {
     const std::span<const DatasetArtifact> datasets,
     const Sha256Digest& registry_hash,
     const DatabaseId& database_id,
-    const std::vector<EncodedTile>& tiles) {
+    const std::vector<EncodedTile>& tiles,
+    const std::uint64_t built_tile_count,
+    const std::uint64_t reused_tile_count,
+    BuildCache* const cache) {
     auto packs = build_packs(configuration, database_id, tiles);
     if (!packs) {
         return Result<BuildReport>::failure(std::move(packs).error());
@@ -1579,12 +2013,27 @@ void remove_if_present(const std::filesystem::path& path) noexcept {
     if (!published) {
         return Result<BuildReport>::failure(std::move(published).error());
     }
+    if (cache != nullptr) {
+        for (const PackArtifact& pack : packs.value()) {
+            for (const PackTilePlacement& placement : pack.placements) {
+                auto updated = cache->UpdatePacking(
+                    tiles[placement.tile_index].key,
+                    pack.id,
+                    placement.payload_offset);
+                if (!updated) {
+                    return Result<BuildReport>::failure(std::move(updated).error());
+                }
+            }
+        }
+    }
 
     BuildReport report;
     report.database_path = database_path;
     report.database_content_hash = database.value().second;
     report.builder_configuration_hash = identity.builder_hash;
     report.tile_count = tiles.size();
+    report.built_tile_count = built_tile_count;
+    report.reused_tile_count = reused_tile_count;
     report.packs.reserve(packs.value().size());
     for (const PackArtifact& pack : packs.value()) {
         report.packs.push_back(PackBuildReport{
@@ -1599,7 +2048,9 @@ void remove_if_present(const std::filesystem::path& path) noexcept {
 
 }  // namespace
 
-Result<BuildReport> build_synthetic(const BuilderConfiguration& configuration) {
+Result<BuildReport> build_synthetic(
+    const BuilderConfiguration& configuration,
+    const BuildOptions options) {
     auto identity = identify_configuration(configuration);
     if (!identity) {
         return Result<BuildReport>::failure(std::move(identity).error());
@@ -1607,6 +2058,15 @@ Result<BuildReport> build_synthetic(const BuilderConfiguration& configuration) {
     auto dataset = make_synthetic_dataset(configuration, identity.value());
     if (!dataset) {
         return Result<BuildReport>::failure(std::move(dataset).error());
+    }
+    auto cache = BuildCache::Open(configuration.cache_directory);
+    if (!cache) {
+        return Result<BuildReport>::failure(std::move(cache).error());
+    }
+    auto recorded_dataset = cache.value().RecordDataset(
+        dataset.value().id, dataset.value().artifact_bundle_hash);
+    if (!recorded_dataset) {
+        return Result<BuildReport>::failure(std::move(recorded_dataset).error());
     }
     const std::array datasets{dataset.value()};
     auto registry_hash = dataset_registry_hash(datasets);
@@ -1617,7 +2077,8 @@ Result<BuildReport> build_synthetic(const BuilderConfiguration& configuration) {
     if (!database_id) {
         return Result<BuildReport>::failure(std::move(database_id).error());
     }
-    auto tiles = build_tiles(configuration, identity.value(), dataset.value());
+    auto tiles = build_tiles(
+        configuration, identity.value(), dataset.value(), cache.value(), options);
     if (!tiles) {
         return Result<BuildReport>::failure(std::move(tiles).error());
     }
@@ -1627,10 +2088,15 @@ Result<BuildReport> build_synthetic(const BuilderConfiguration& configuration) {
         datasets,
         registry_hash.value(),
         database_id.value(),
-        tiles.value());
+        tiles.value().tiles,
+        tiles.value().built_tile_count,
+        tiles.value().reused_tile_count,
+        &cache.value());
 }
 
-Result<BuildReport> build_raster_source(const BuilderConfiguration& configuration) {
+Result<BuildReport> build_raster_source(
+    const BuilderConfiguration& configuration,
+    const BuildOptions options) {
     auto identity = identify_configuration(configuration);
     if (!identity) {
         return Result<BuildReport>::failure(std::move(identity).error());
@@ -1647,8 +2113,24 @@ Result<BuildReport> build_raster_source(const BuilderConfiguration& configuratio
         source_pointers.push_back(source.get());
         datasets.push_back(source->metadata());
     }
+    auto cache = BuildCache::Open(configuration.cache_directory);
+    if (!cache) {
+        return Result<BuildReport>::failure(std::move(cache).error());
+    }
+    for (const DatasetArtifact& dataset : datasets) {
+        auto recorded = cache.value().RecordDataset(
+            dataset.id, dataset.artifact_bundle_hash);
+        if (!recorded) {
+            return Result<BuildReport>::failure(std::move(recorded).error());
+        }
+    }
     auto tiles = build_raster_tiles(
-        configuration, identity.value(), source_pointers, datasets);
+        configuration,
+        identity.value(),
+        source_pointers,
+        datasets,
+        cache.value(),
+        options);
     if (!tiles) {
         return Result<BuildReport>::failure(std::move(tiles).error());
     }
@@ -1669,7 +2151,10 @@ Result<BuildReport> build_raster_source(const BuilderConfiguration& configuratio
         datasets,
         registry_hash.value(),
         database_id.value(),
-        tiles.value());
+        tiles.value().tiles,
+        tiles.value().built_tile_count,
+        tiles.value().reused_tile_count,
+        &cache.value());
 }
 
 }  // namespace lunar::terrain::builder

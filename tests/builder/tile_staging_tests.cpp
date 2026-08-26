@@ -130,6 +130,10 @@ TEST_CASE("M4 resolves equatorial polar reversed edges and cube corners before q
         CHECK(std::filesystem::file_size(tile.value().artifact_path) ==
               52U + std::uintmax_t{format_v1::core_vertices} *
                         format_v1::core_vertices * sizeof(double));
+        auto loaded = load_staged_elevation_tile(
+            tile.value().artifact_path, key.value(), dependency);
+        REQUIRE(loaded);
+        CHECK(loaded.value().core_samples == tile.value().core_samples);
         staged.push_back(std::move(tile).value());
     }
 

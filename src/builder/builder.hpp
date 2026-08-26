@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <optional>
+#include <stop_token>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -49,6 +50,13 @@ struct BuildReport {
     Sha256Digest builder_configuration_hash;
     std::vector<PackBuildReport> packs;
     std::uint64_t tile_count{};
+    std::uint64_t built_tile_count{};
+    std::uint64_t reused_tile_count{};
+};
+
+struct BuildOptions {
+    bool incremental{};
+    std::stop_token cancellation;
 };
 
 struct ValidationReport {
@@ -80,10 +88,16 @@ enum class DiagnosticExportFormat : std::uint8_t {
 [[nodiscard]] std::string_view version_string() noexcept;
 [[nodiscard]] Result<ScanReport> scan_configuration(const BuilderConfiguration& configuration);
 [[nodiscard]] Result<PlanReport> plan_configuration(const BuilderConfiguration& configuration);
-[[nodiscard]] Result<BuildReport> build_configuration(const BuilderConfiguration& configuration);
+[[nodiscard]] Result<BuildReport> build_configuration(
+    const BuilderConfiguration& configuration,
+    BuildOptions options = {});
 [[nodiscard]] Result<PlanReport> plan_synthetic(const BuilderConfiguration& configuration);
-[[nodiscard]] Result<BuildReport> build_synthetic(const BuilderConfiguration& configuration);
-[[nodiscard]] Result<BuildReport> build_raster_source(const BuilderConfiguration& configuration);
+[[nodiscard]] Result<BuildReport> build_synthetic(
+    const BuilderConfiguration& configuration,
+    BuildOptions options = {});
+[[nodiscard]] Result<BuildReport> build_raster_source(
+    const BuilderConfiguration& configuration,
+    BuildOptions options = {});
 [[nodiscard]] Result<ValidationReport> validate_database(
     const std::filesystem::path& path,
     bool full);

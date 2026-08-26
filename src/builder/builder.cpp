@@ -23,6 +23,8 @@
 #include <lunar/terrain/format_v1.hpp>
 #include <lunar/terrain/qsc_topology.hpp>
 
+#include "builder/hierarchy.hpp"
+
 namespace lunar::terrain::builder {
 namespace {
 
@@ -185,6 +187,44 @@ namespace {
     return Result<std::uint64_t>::success(verified);
 }
 
+[[nodiscard]] Result<void> validate_hierarchy(
+    const std::vector<std::pair<TileIndexEntry, DecodedTerrainTile>>& tiles,
+    const std::filesystem::path& path) {
+    std::map<std::uint64_t, const TileIndexEntry*> by_key;
+    for (const auto& [entry, unused_tile] : tiles) {
+        static_cast<void>(unused_tile);
+        by_key.emplace(entry.key.encoded(), &entry);
+    }
+    for (const auto& [entry, unused_tile] : tiles) {
+        static_cast<void>(unused_tile);
+        std::uint8_t expected_mask = 0;
+        auto children = entry.key.children();
+        if (children) {
+            for (std::uint8_t quadrant = 0; quadrant < children.value().size(); ++quadrant) {
+                if (by_key.contains(children.value()[quadrant].encoded())) {
+                    expected_mask = static_cast<std::uint8_t>(
+                        expected_mask | static_cast<std::uint8_t>(1U << quadrant));
+                }
+            }
+        }
+        if (expected_mask != entry.materialized_child_mask) {
+            return Result<void>::failure(validation_error(
+                "materialized child mask disagrees with the tile index", path, entry.key));
+        }
+        // M3/M5 emitted a single regional prototype tile. Preserve validation
+        // of that historical fixture while requiring connectivity for every
+        // multi-node sparse hierarchy built from M6 onward.
+        if (tiles.size() > 1 && entry.key.level() != 0) {
+            const auto parent = entry.key.parent();
+            if (!parent || !by_key.contains(parent->encoded())) {
+                return Result<void>::failure(validation_error(
+                    "sparse hierarchy contains an orphan tile", path, entry.key));
+            }
+        }
+    }
+    return Result<void>::success();
+}
+
 }  // namespace
 
 std::string_view version_string() noexcept {
@@ -269,8 +309,15 @@ Result<PlanReport> plan_configuration(const BuilderConfiguration& configuration)
             target = index;
         }
     }
-    auto key = choose_raster_prototype_tile(
-        *sources.value()[target], configuration.maximum_level);
+    const IRasterSource& target_raster = *sources.value()[target];
+    auto target_level = choose_source_level(
+        target_raster.details().footprint,
+        target_raster.metadata().effective_resolution_meters,
+        configuration.maximum_level);
+    if (!target_level) {
+        return Result<PlanReport>::failure(std::move(target_level).error());
+    }
+    auto key = choose_raster_prototype_tile(target_raster, target_level.value());
     if (!key) {
         return Result<PlanReport>::failure(std::move(key).error());
     }
@@ -288,10 +335,12 @@ Result<PlanReport> plan_configuration(const BuilderConfiguration& configuration)
     });
 }
 
-Result<BuildReport> build_configuration(const BuilderConfiguration& configuration) {
+Result<BuildReport> build_configuration(
+    const BuilderConfiguration& configuration,
+    const BuildOptions options) {
     return configuration.source_kind == BuilderSourceKind::synthetic
-        ? build_synthetic(configuration)
-        : build_raster_source(configuration);
+        ? build_synthetic(configuration, options)
+        : build_raster_source(configuration, options);
 }
 
 Result<PlanReport> plan_synthetic(const BuilderConfiguration& configuration) {
@@ -331,6 +380,10 @@ Result<ValidationReport> validate_database(
     }
     std::uint64_t seams = 0;
     if (full) {
+        auto hierarchy = validate_hierarchy(tiles.value(), path);
+        if (!hierarchy) {
+            return Result<ValidationReport>::failure(std::move(hierarchy).error());
+        }
         auto validated = validate_seams(tiles.value(), path);
         if (!validated) {
             return Result<ValidationReport>::failure(std::move(validated).error());
@@ -511,17 +564,23 @@ std::string format_report(const BuildReport& report, const bool json) {
         }
         return fmt::format(
             "{{\"builder_configuration_sha256\":{},\"database_content_sha256\":{},"
-            "\"database_path\":{},\"packs\":[{}],\"tile_count\":{}}}\n",
+            "\"database_path\":{},\"packs\":[{}],\"tile_count\":{},"
+            "\"built_tile_count\":{},\"reused_tile_count\":{}}}\n",
             json_string(report.builder_configuration_hash.to_hex()),
             json_string(report.database_content_hash.to_hex()),
             json_string(report.database_path.string()),
             packs,
-            report.tile_count);
+            report.tile_count,
+            report.built_tile_count,
+            report.reused_tile_count);
     }
     return fmt::format(
-        "published: {}\ntiles: {}\npacks: {}\ndatabase content sha256: {}\n",
+        "published: {}\ntiles: {} (built {}, reused {})\npacks: {}\n"
+        "database content sha256: {}\n",
         report.database_path.string(),
         report.tile_count,
+        report.built_tile_count,
+        report.reused_tile_count,
         report.packs.size(),
         report.database_content_hash.to_hex());
 }

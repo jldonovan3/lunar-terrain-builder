@@ -238,6 +238,34 @@ struct SamplePatch {
         "{:016x}-{}.core-v1", key.encoded(), dependency_hash.to_hex());
 }
 
+[[nodiscard]] std::uint16_t read_u16(
+    const std::span<const std::byte> bytes,
+    const std::size_t offset) noexcept {
+    return static_cast<std::uint16_t>(
+        std::to_integer<std::uint16_t>(bytes[offset]) |
+        (std::to_integer<std::uint16_t>(bytes[offset + 1U]) << 8U));
+}
+
+[[nodiscard]] std::uint32_t read_u32(
+    const std::span<const std::byte> bytes,
+    const std::size_t offset) noexcept {
+    std::uint32_t value = 0;
+    for (std::uint32_t index = 0; index < 4U; ++index) {
+        value |= std::to_integer<std::uint32_t>(bytes[offset + index]) << (index * 8U);
+    }
+    return value;
+}
+
+[[nodiscard]] std::uint64_t read_u64(
+    const std::span<const std::byte> bytes,
+    const std::size_t offset) noexcept {
+    std::uint64_t value = 0;
+    for (std::uint32_t index = 0; index < 8U; ++index) {
+        value |= std::to_integer<std::uint64_t>(bytes[offset + index]) << (index * 8U);
+    }
+    return value;
+}
+
 [[nodiscard]] Bytes serialize_staged_core(
     const LunarTileKey key,
     const Sha256Digest& dependency_hash,
@@ -532,6 +560,68 @@ void write_apron_sample(
 }
 
 }  // namespace
+
+std::filesystem::path staged_elevation_artifact_path(
+    const std::filesystem::path& staging_directory,
+    const LunarTileKey key,
+    const Sha256Digest& dependency_hash) {
+    return artifact_path(staging_directory, key, dependency_hash);
+}
+
+Result<StagedElevationTile> load_staged_elevation_tile(
+    const std::filesystem::path& path,
+    const LunarTileKey expected_key,
+    const Sha256Digest& expected_dependency_hash) {
+    auto file = read_file(path);
+    if (!file) {
+        return Result<StagedElevationTile>::failure(std::move(file).error());
+    }
+    constexpr std::size_t header_bytes = 52;
+    const std::span<const std::byte> bytes = file.value();
+    if (bytes.size() < header_bytes ||
+        std::string_view{reinterpret_cast<const char*>(bytes.data()), 4} != "LTSC" ||
+        read_u16(bytes, 4) != 1 || read_u16(bytes, 6) != 0) {
+        return failure<StagedElevationTile>(
+            ErrorCode::invalid_format, "staging artifact header is invalid", path, expected_key);
+    }
+    auto stored_key = LunarTileKey::from_encoded(read_u64(bytes, 8));
+    if (!stored_key || stored_key.value() != expected_key ||
+        !std::ranges::equal(
+            bytes.subspan(16, expected_dependency_hash.bytes.size()),
+            expected_dependency_hash.bytes)) {
+        return failure<StagedElevationTile>(
+            ErrorCode::hash_mismatch,
+            "staging artifact identity does not match the requested dependency",
+            path,
+            expected_key);
+    }
+    const std::uint32_t sample_count = read_u32(bytes, 48);
+    if (sample_count != core_sample_count ||
+        bytes.size() != header_bytes + std::size_t{sample_count} * sizeof(double)) {
+        return failure<StagedElevationTile>(
+            ErrorCode::invalid_format,
+            "staging artifact sample payload is invalid",
+            path,
+            expected_key);
+    }
+    std::vector<double> samples(sample_count);
+    for (std::size_t index = 0; index < samples.size(); ++index) {
+        samples[index] = std::bit_cast<double>(read_u64(bytes, header_bytes + index * 8U));
+        if (!std::isfinite(samples[index])) {
+            return failure<StagedElevationTile>(
+                ErrorCode::invalid_format,
+                "staging artifact contains a non-finite elevation",
+                path,
+                expected_key);
+        }
+    }
+    return Result<StagedElevationTile>::success(StagedElevationTile{
+        expected_key,
+        expected_dependency_hash,
+        std::move(samples),
+        path,
+    });
+}
 
 Result<StagedElevationTile> stage_elevation_tile(
     const LunarTileKey key,

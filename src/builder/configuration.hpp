@@ -69,6 +69,7 @@ struct RasterConfiguration {
     double south_latitude_degrees{};
     double north_latitude_degrees{};
     double nominal_resolution_meters{};
+    double effective_resolution_meters{};
     double source_no_data{};
     double sample_scale{1.0};
     double sample_offset{};

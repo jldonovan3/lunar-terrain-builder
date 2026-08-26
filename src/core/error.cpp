@@ -36,6 +36,8 @@ std::string_view error_code_name(const ErrorCode code) noexcept {
             return "not_found";
         case ErrorCode::internal_error:
             return "internal_error";
+        case ErrorCode::cancelled:
+            return "cancelled";
     }
     return "unknown";
 }
@@ -64,4 +66,3 @@ Error& Error::with_channel(const std::uint16_t id) noexcept {
 }
 
 }  // namespace lunar::terrain
-

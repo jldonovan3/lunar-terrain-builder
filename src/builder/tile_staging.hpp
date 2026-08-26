@@ -29,6 +29,18 @@ struct FinalizedElevationTile {
     std::vector<std::uint16_t> serialized_samples;
 };
 
+[[nodiscard]] std::filesystem::path staged_elevation_artifact_path(
+    const std::filesystem::path& staging_directory,
+    LunarTileKey key,
+    const Sha256Digest& dependency_hash);
+
+// Loads and validates every field of a dependency-named staged core. Cache
+// metadata alone never makes an artifact reusable.
+[[nodiscard]] Result<StagedElevationTile> load_staged_elevation_tile(
+    const std::filesystem::path& artifact_path,
+    LunarTileKey expected_key,
+    const Sha256Digest& expected_dependency_hash);
+
 // Samples and atomically persists one independent 257x257 binary64 core.
 // The artifact name includes the complete dependency hash and its contents use
 // explicit little-endian fields; staging artifacts are disposable build state.

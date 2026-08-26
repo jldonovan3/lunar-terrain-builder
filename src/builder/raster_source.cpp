@@ -280,6 +280,7 @@ void append_domain(Bytes& bytes, const std::string_view value) {
         configuration.license,
     };
     dataset.nominal_resolution_meters = configuration.nominal_resolution_meters;
+    dataset.effective_resolution_meters = configuration.effective_resolution_meters;
     dataset.horizontal_accuracy_meters = canonical_nan;
     dataset.vertical_accuracy_meters = canonical_nan;
     dataset.source_no_data = configuration.source_no_data;
@@ -310,7 +311,8 @@ void append_domain(Bytes& bytes, const std::string_view value) {
     dataset.metadata_json = fmt::format(
         "{{\"artifact_members\":[{}],\"auxiliary_member\":{},\"data_type\":{},"
         "\"datum\":{{\"reference_radius_m\":1737400,\"source_reference_radius_m\":{}}},"
-        "\"elevation_representation\":{},\"footprint\":{{\"east_longitude_degrees\":{},"
+        "\"effective_resolution_meters\":{},\"elevation_representation\":{},"
+        "\"footprint\":{{\"east_longitude_degrees\":{},"
         "\"north_latitude_degrees\":{},\"south_latitude_degrees\":{},"
         "\"west_longitude_degrees\":{}}},\"fusion_policy\":{},"
         "\"label_member\":{},\"metadata_overrides\":{},"
@@ -320,6 +322,7 @@ void append_domain(Bytes& bytes, const std::string_view value) {
         json_string(configuration.auxiliary_member),
         json_string(configuration.expected_data_type),
         configuration.source_reference_radius_meters,
+        configuration.effective_resolution_meters,
         json_string(representation),
         configuration.east_longitude_degrees,
         configuration.north_latitude_degrees,

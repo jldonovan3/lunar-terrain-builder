@@ -69,9 +69,12 @@ int main(int argc, char** argv) {
 
     std::filesystem::path build_path;
     bool build_json = false;
+    bool build_incremental = false;
     CLI::App* build = app.add_subcommand("build", "Build and transactionally publish LTDB/LTP files");
     build->add_option("configuration", build_path, "TOML configuration path")->required();
     build->add_flag("--json", build_json, "Emit machine-readable JSON");
+    build->add_flag(
+        "--incremental", build_incremental, "Reuse dependency-identical staged tiles");
 
     std::filesystem::path validate_path;
     bool validate_full = false;
@@ -135,7 +138,8 @@ int main(int argc, char** argv) {
         if (!configuration) {
             return report_error(configuration.error(), build_json);
         }
-        auto report = build_configuration(configuration.value());
+        auto report = build_configuration(
+            configuration.value(), BuildOptions{build_incremental, {}});
         if (!report) {
             return report_error(report.error(), build_json);
         }

@@ -6,6 +6,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iterator>
+#include <stop_token>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -216,6 +217,67 @@ TEST_CASE("two clean synthetic builds are byte-identical and round-trip without 
     REQUIRE(inspection);
     CHECK(inspection.value().tile_key.has_value());
     CHECK(inspection.value().channel_count == 2);
+}
+
+TEST_CASE("incremental synthetic rebuild reuses staged tiles and converges with clean output") {
+    TemporaryDirectory temporary;
+    BuilderConfiguration first;
+    first.output_directory = temporary.path() / "first";
+    first.cache_directory = temporary.path() / "shared-cache";
+    first.database_name = "MoonSynthetic";
+    first.synthetic_stable_key = "synthetic.p0.v1";
+    first.synthetic_source_uri = "synthetic://analytic-v1";
+    first.worker_threads = 3;
+
+    auto initial = build_synthetic(first, BuildOptions{false, {}});
+    REQUIRE(initial);
+    CHECK(initial.value().built_tile_count == 6);
+    CHECK(initial.value().reused_tile_count == 0);
+    CHECK(std::filesystem::is_regular_file(
+        first.cache_directory / "cache.sqlite"));
+
+    BuilderConfiguration incremental_configuration = first;
+    incremental_configuration.output_directory = temporary.path() / "incremental";
+    auto incremental = build_synthetic(
+        incremental_configuration, BuildOptions{true, {}});
+    REQUIRE(incremental);
+    CHECK(incremental.value().built_tile_count == 0);
+    CHECK(incremental.value().reused_tile_count == 6);
+
+    BuilderConfiguration clean_configuration = first;
+    clean_configuration.output_directory = temporary.path() / "clean";
+    clean_configuration.cache_directory = temporary.path() / "clean-cache";
+    auto clean = build_synthetic(clean_configuration, BuildOptions{false, {}});
+    REQUIRE(clean);
+    CHECK(clean.value().built_tile_count == 6);
+    CHECK(clean.value().reused_tile_count == 0);
+
+    CHECK(read_bytes(incremental.value().database_path) ==
+          read_bytes(clean.value().database_path));
+    REQUIRE(incremental.value().packs.size() == clean.value().packs.size());
+    for (std::size_t index = 0; index < incremental.value().packs.size(); ++index) {
+        CHECK(read_bytes(incremental.value().packs[index].path) ==
+              read_bytes(clean.value().packs[index].path));
+    }
+}
+
+TEST_CASE("cancelled synthetic build publishes no database") {
+    TemporaryDirectory temporary;
+    BuilderConfiguration configuration;
+    configuration.output_directory = temporary.path() / "cancelled";
+    configuration.cache_directory = temporary.path() / "cache";
+    configuration.database_name = "MoonSynthetic";
+    configuration.synthetic_stable_key = "synthetic.p0.v1";
+    configuration.synthetic_source_uri = "synthetic://analytic-v1";
+
+    std::stop_source cancellation;
+    cancellation.request_stop();
+    auto build = build_synthetic(
+        configuration, BuildOptions{false, cancellation.get_token()});
+    REQUIRE_FALSE(build);
+    CHECK(build.error().code == ErrorCode::cancelled);
+    CHECK_FALSE(std::filesystem::exists(
+        configuration.output_directory / "MoonSynthetic.ltdb"));
 }
 
 TEST_CASE("failed publication leaves the previous database readable") {

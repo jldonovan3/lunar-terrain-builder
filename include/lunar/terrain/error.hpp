@@ -23,6 +23,7 @@ enum class ErrorCode : std::uint16_t {
     decompression_failed = 12,
     not_found = 13,
     internal_error = 14,
+    cancelled = 15,
 };
 
 [[nodiscard]] std::string_view error_code_name(ErrorCode code) noexcept;
@@ -49,4 +50,3 @@ struct Error {
 };
 
 }  // namespace lunar::terrain
-

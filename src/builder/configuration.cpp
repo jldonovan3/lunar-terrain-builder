@@ -291,7 +291,7 @@ void append_domain(ByteVector& bytes, const std::string_view domain) {
         "{{\"artifact_bundle_bytes\":{},\"artifact_bundle_sha256\":{},"
         "\"artifact_members\":[{}],\"auxiliary_member\":{},"
         "\"bounds_degrees\":{{\"east\":{},\"north\":{},\"south\":{},\"west\":{}}},"
-        "\"elevation_representation\":{},\"expected_data_type\":{},"
+        "\"effective_resolution_m\":{},\"elevation_representation\":{},\"expected_data_type\":{},"
         "\"expected_height\":{},\"expected_width\":{},\"fusion_policy\":{},"
         "\"instrument\":{},\"label_member\":{},\"license\":{},"
         "\"metadata_override\":{},\"mission\":{},\"no_data_policy\":{},"
@@ -308,6 +308,7 @@ void append_domain(ByteVector& bytes, const std::string_view domain) {
         raster.north_latitude_degrees,
         raster.south_latitude_degrees,
         raster.west_longitude_degrees,
+        raster.effective_resolution_meters,
         json_string(representation),
         json_string(raster.expected_data_type),
         raster.expected_height,
@@ -345,6 +346,8 @@ void append_domain(ByteVector& bytes, const std::string_view domain) {
             "\"source_uri\":{},\"stable_key\":{}}}],\"datum\":{{\"elevation_origin_m\":-16384,"
             "\"elevation_step_m\":0.5,\"reference_radius_m\":1737400}},"
             "\"fusion\":{{\"algorithm\":\"synthetic_analytic_v1\",\"version\":1}},"
+            "\"hierarchy\":{{\"child_masks\":\"materialized_direct_children_v1\","
+            "\"geometric_error\":\"bilinear_u16_nearest_ancestor_v1\"}},"
             "\"projection\":{{\"id\":1,\"version\":1}},\"quantization\":{{\"id\":1}},"
             "\"seam\":{{\"algorithm\":\"lowest_tile_key_patches_v1\","
             "\"quantization_order\":\"after_seam\"}},"
@@ -389,6 +392,9 @@ void append_domain(ByteVector& bytes, const std::string_view domain) {
         "\"quality\":\"or_4x4_v1\","
         "\"source_order\":\"priority_then_dataset_id\","
         "\"transition\":\"smoothstep_manhattan_32_samples\",\"version\":1}},"
+        "\"hierarchy\":{{\"child_masks\":\"materialized_direct_children_v1\","
+        "\"geometric_error\":\"bilinear_u16_nearest_ancestor_v1\","
+        "\"level_selection\":\"worst_case_local_spacing_v1\"}},"
         "\"projection\":{{\"id\":1,\"version\":1}},\"quantization\":{{\"id\":1}},"
         "\"seam\":{{\"algorithm\":\"lowest_tile_key_patches_v1\","
         "\"quantization_order\":\"after_seam\"}},"
@@ -547,6 +553,7 @@ void append_domain(ByteVector& bytes, const std::string_view domain) {
              "label_member", "expected_data_type", "artifact_members", "artifact_bundle_bytes", "artifact_bundle_sha256",
              "expected_width", "expected_height", "west_longitude_degrees", "east_longitude_degrees",
              "south_latitude_degrees", "north_latitude_degrees", "nominal_resolution_meters",
+             "effective_resolution_meters",
              "source_no_data", "sample_scale", "sample_offset", "elevation_representation",
              "source_reference_radius_meters", "no_data_policy", "metadata_override", "priority",
              "role", "fusion_policy"},
@@ -689,6 +696,9 @@ void append_domain(ByteVector& bytes, const std::string_view domain) {
     auto south = required_value<double>(raster.value(), "raster", "south_latitude_degrees", path);
     auto north = required_value<double>(raster.value(), "raster", "north_latitude_degrees", path);
     auto resolution = required_value<double>(raster.value(), "raster", "nominal_resolution_meters", path);
+    auto effective_resolution = optional_value<double>(
+        raster.value(), "raster", "effective_resolution_meters",
+        std::numeric_limits<double>::quiet_NaN(), path);
     auto no_data = required_value<double>(raster.value(), "raster", "source_no_data", path);
     auto sample_scale = required_value<double>(raster.value(), "raster", "sample_scale", path);
     auto sample_offset = optional_value<double>(raster.value(), "raster", "sample_offset", 0.0, path);
@@ -706,7 +716,7 @@ void append_domain(ByteVector& bytes, const std::string_view domain) {
     if (!(raster_key && raster_uri && product_name && producer && mission && instrument &&
           product_version && original_crs && license && raster_member && auxiliary_member &&
           label_member && expected_data_type && members && expected_width && expected_height && west && east && south &&
-          north && resolution && no_data && sample_scale && sample_offset && representation &&
+          north && resolution && effective_resolution && no_data && sample_scale && sample_offset && representation &&
           source_radius && no_data_policy && metadata_override && priority && role && fusion_policy)) {
         const Error* first_error = nullptr;
         const auto capture = [&first_error](const auto& value) {
@@ -718,7 +728,7 @@ void append_domain(ByteVector& bytes, const std::string_view domain) {
         capture(mission); capture(instrument); capture(product_version); capture(original_crs);
         capture(license); capture(raster_member); capture(auxiliary_member); capture(label_member);
         capture(expected_data_type); capture(members); capture(expected_width); capture(expected_height); capture(west);
-        capture(east); capture(south); capture(north); capture(resolution); capture(no_data);
+        capture(east); capture(south); capture(north); capture(resolution); capture(effective_resolution); capture(no_data);
         capture(sample_scale); capture(sample_offset); capture(representation); capture(source_radius);
         capture(no_data_policy); capture(metadata_override); capture(priority); capture(role);
         capture(fusion_policy);
@@ -792,6 +802,8 @@ void append_domain(ByteVector& bytes, const std::string_view domain) {
         members.value(), [&](const ArtifactMemberConfiguration& member) {
             return member.name == label_member.value();
         });
+    const double selected_effective_resolution = std::isnan(effective_resolution.value())
+        ? resolution.value() : effective_resolution.value();
     const std::array raster_checks{
         require_equal(stable_key(raster_key.value()), path,
                       "raster.stable_key must contain only lowercase ASCII letters, digits, '.', '-', or '_'"),
@@ -822,6 +834,11 @@ void append_domain(ByteVector& bytes, const std::string_view domain) {
                           resolution.value() * 1'000.0 <=
                               static_cast<double>(std::numeric_limits<std::uint32_t>::max()),
                       path, "raster.nominal_resolution_meters is outside the v1 millimeter range"),
+        require_equal(std::isfinite(selected_effective_resolution) &&
+                          selected_effective_resolution > 0.0 &&
+                          selected_effective_resolution * 1'000.0 <=
+                              static_cast<double>(std::numeric_limits<std::uint32_t>::max()),
+                      path, "raster.effective_resolution_meters is outside the v1 millimeter range"),
         require_equal(std::isfinite(no_data.value()) && std::isfinite(sample_scale.value()) &&
                           sample_scale.value() != 0.0 && std::isfinite(sample_offset.value()) &&
                           std::isfinite(source_radius.value()) && source_radius.value() > 0.0,
@@ -870,6 +887,7 @@ void append_domain(ByteVector& bytes, const std::string_view domain) {
     raster_configuration.south_latitude_degrees = south.value();
     raster_configuration.north_latitude_degrees = north.value();
     raster_configuration.nominal_resolution_meters = resolution.value();
+    raster_configuration.effective_resolution_meters = selected_effective_resolution;
     raster_configuration.source_no_data = no_data.value();
     raster_configuration.sample_scale = sample_scale.value();
     raster_configuration.sample_offset = sample_offset.value();

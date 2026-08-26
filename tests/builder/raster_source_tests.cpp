@@ -262,7 +262,7 @@ void write_radius_raster_without_metadata(
            "name = \"GeneratedFusion\"\n"
            "output_directory = \"" + path_text(output) + "\"\n"
            "\n[tiles]\n"
-           "max_level = 8\n\n" +
+           "max_level = 10\n\n" +
            (reversed ? fine + base : base + fine) +
            "[local]\n"
            "source_root = \"" + path_text(source_root) + "\"\n";
@@ -337,14 +337,16 @@ TEST_CASE("generated GDAL raster catalogs plans and builds deterministic P1 outp
     auto plan = plan_configuration(first.value());
     REQUIRE(plan);
     REQUIRE(plan.value().tiles.size() == 1);
-    CHECK(plan.value().tiles.front().level() == 8);
+    CHECK(plan.value().tiles.front().level() == 7);
     CHECK(plan.value().tiles.front().face() == 0);
 
     auto first_build = build_configuration(first.value());
-    auto second_build = build_configuration(second.value());
+    auto second_build = build_configuration(second.value(), BuildOptions{true, {}});
     REQUIRE(first_build);
     REQUIRE(second_build);
     CHECK(first_build.value().tile_count == 1);
+    CHECK(first_build.value().built_tile_count == 1);
+    CHECK(second_build.value().reused_tile_count == 1);
     CHECK(first_build.value().database_content_hash == second_build.value().database_content_hash);
     CHECK(read_bytes(first_build.value().database_path) == read_bytes(second_build.value().database_path));
     REQUIRE(first_build.value().packs.size() == 1);
@@ -354,7 +356,7 @@ TEST_CASE("generated GDAL raster catalogs plans and builds deterministic P1 outp
 
     auto database = LunarTerrainDatabase::Open(first_build.value().database_path);
     REQUIRE(database);
-    CHECK(database.value().Header().maximum_level == 8);
+    CHECK(database.value().Header().maximum_level == 7);
     CHECK(database.value().Header().dataset_count == 1);
     const LunarTileKey key = plan.value().tiles.front();
     auto tile = database.value().ReadTile(key);

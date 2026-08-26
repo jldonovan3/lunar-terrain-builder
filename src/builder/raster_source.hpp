@@ -30,6 +30,7 @@ struct DatasetArtifact {
     std::uint32_t flags{};
     std::array<std::string, 8> strings;
     double nominal_resolution_meters{};
+    double effective_resolution_meters{};
     double horizontal_accuracy_meters{};
     double vertical_accuracy_meters{};
     double source_no_data{};

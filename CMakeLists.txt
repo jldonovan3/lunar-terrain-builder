@@ -80,16 +80,24 @@ target_sources(
     PRIVATE
         src/builder/builder.cpp
         src/builder/builder.hpp
+        src/builder/build_cache.cpp
+        src/builder/build_cache.hpp
         src/builder/configuration.cpp
         src/builder/configuration.hpp
         src/builder/container_writer.cpp
         src/builder/diagnostics.cpp
         src/builder/fusion.cpp
         src/builder/fusion.hpp
+        src/builder/hierarchy.cpp
+        src/builder/hierarchy.hpp
+        src/builder/packing.cpp
+        src/builder/packing.hpp
         src/builder/raster_source.cpp
         src/builder/raster_source.hpp
         src/builder/tile_staging.cpp
         src/builder/tile_staging.hpp
+        src/builder/task_executor.cpp
+        src/builder/task_executor.hpp
 )
 target_include_directories(lunar_terrain_builder_lib PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src")
 target_compile_features(lunar_terrain_builder_lib PUBLIC cxx_std_20)
@@ -148,7 +156,10 @@ if(LUNAR_TERRAIN_BUILD_TESTING)
     add_executable(
         lunar_terrain_builder_tests
         tests/builder/builder_tests.cpp
+        tests/builder/build_cache_tests.cpp
         tests/builder/fusion_tests.cpp
+        tests/builder/hierarchy_tests.cpp
+        tests/builder/packing_tests.cpp
         tests/builder/projection_oracle_tests.cpp
         tests/builder/raster_source_tests.cpp
         tests/builder/tile_staging_tests.cpp
