@@ -45,10 +45,15 @@ ctest --preset debug
 - Do not add install, export, or package-config machinery until a consumer requirement exists.
 - Linux/GCC and Windows/MSVC must remain supported. MSVC source compilation uses UTF-8 and precise floating point.
 
+## Dataset provisioning
+
+- `provisioning/provision.py` is the single Windows/Linux provisioning entry point; it requires Python 3.9+ and only the standard library.
+- `provisioning/provisioning.json` is the authoritative data-driven product/profile lock. Keep external roots on the command line or in the product's configured environment variable, and use `--verify-only` when network access must be prohibited.
+- Preserve locked member order, byte counts, checksums, and canonical bundle identities. Add future product profiles only after authoritative URLs, revisions, members, and hashes are qualified.
+
 ## Working-tree hygiene
 
 - Preserve user changes and keep unrelated edits out of the active patch.
 - Keep build trees, dependency installations, caches, staging data, `.ltdb`, and `.ltp` outputs out of source control.
 - Committed `tests/golden/format_v1` vectors are intentional compatibility fixtures, not disposable generated output.
 - Do not commit machine-local paths, job counts, cache locations, or staging locations.
-

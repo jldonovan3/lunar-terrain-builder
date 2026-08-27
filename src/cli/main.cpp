@@ -92,18 +92,38 @@ int main(int argc, char** argv) {
     inspect->add_option("tile", inspect_key, "Optional canonical LunarTileKey");
     inspect->add_flag("--json", inspect_json, "Emit machine-readable JSON");
 
+    std::filesystem::path diff_before_path;
+    std::filesystem::path diff_after_path;
+    bool diff_json = false;
+    CLI::App* diff = app.add_subcommand(
+        "diff", "Classify scientific, provenance, dependency, dataset, and package changes");
+    diff->add_option("before", diff_before_path, "Baseline LTDB manifest path")->required();
+    diff->add_option("after", diff_after_path, "Comparison LTDB manifest path")->required();
+    diff->add_flag("--json", diff_json, "Emit machine-readable JSON");
+
     std::filesystem::path export_path;
     std::filesystem::path export_output;
     std::string export_key;
     std::string export_format;
     CLI::App* export_command = app.add_subcommand(
-        "export", "Export M5 provenance, quality, or transition diagnostics");
+        "export", "Export mesh, raster, samples, elevation, provenance, or quality diagnostics");
     export_command->add_option("database", export_path, "LTDB manifest path")->required();
     export_command->add_option("tile", export_key, "Canonical LunarTileKey")->required();
     export_command->add_option(
         "--format", export_format,
-        "provenance-ppm, quality-ppm, or transition-csv")->required();
+        "ply, obj, elevation-pgm, csv, raw-u16, provenance-ppm, quality-ppm, or transition-csv")
+        ->required();
     export_command->add_option("--output", export_output, "Diagnostic output path")->required();
+
+    std::filesystem::path benchmark_path;
+    std::filesystem::path benchmark_output;
+    bool benchmark_json = false;
+    CLI::App* benchmark = app.add_subcommand(
+        "benchmark", "Record the M7 catalog/build/validation/incremental scale metrics");
+    benchmark->add_option("configuration", benchmark_path, "TOML configuration path")->required();
+    benchmark->add_option("--output", benchmark_output, "Versioned JSON benchmark report path")
+        ->required();
+    benchmark->add_flag("--json", benchmark_json, "Emit machine-readable JSON");
 
     app.require_subcommand(1);
     CLI11_PARSE(app, argc, argv);
@@ -170,15 +190,33 @@ int main(int argc, char** argv) {
         fmt::print("{}", format_report(report.value(), inspect_json));
         return 0;
     }
+    if (*diff) {
+        auto report = diff_databases(diff_before_path, diff_after_path);
+        if (!report) {
+            return report_error(report.error(), diff_json);
+        }
+        fmt::print("{}", format_report(report.value(), diff_json));
+        return 0;
+    }
     if (*export_command) {
         auto key = lunar::terrain::LunarTileKey::parse(export_key);
         if (!key) {
             return report_error(key.error(), false);
         }
         std::optional<DiagnosticExportFormat> format;
-        if (export_format == "provenance-ppm") {
+        if (export_format == "ply") {
+            format = DiagnosticExportFormat::ply;
+        } else if (export_format == "obj") {
+            format = DiagnosticExportFormat::obj;
+        } else if (export_format == "elevation-pgm" || export_format == "raster") {
+            format = DiagnosticExportFormat::elevation_pgm;
+        } else if (export_format == "csv") {
+            format = DiagnosticExportFormat::sample_csv;
+        } else if (export_format == "raw-u16") {
+            format = DiagnosticExportFormat::raw_u16_le;
+        } else if (export_format == "provenance-ppm" || export_format == "provenance") {
             format = DiagnosticExportFormat::provenance_ppm;
-        } else if (export_format == "quality-ppm") {
+        } else if (export_format == "quality-ppm" || export_format == "quality") {
             format = DiagnosticExportFormat::quality_ppm;
         } else if (export_format == "transition-csv") {
             format = DiagnosticExportFormat::transition_csv;
@@ -186,14 +224,30 @@ int main(int argc, char** argv) {
         if (!format) {
             return report_error(lunar::terrain::Error{
                 lunar::terrain::ErrorCode::invalid_argument,
-                "export format must be provenance-ppm, quality-ppm, or transition-csv"}, false);
+                "unsupported export format"}, false);
         }
-        auto exported = export_tile_diagnostic(
+        auto exported = export_tile(
             export_path, key.value(), *format, export_output);
         if (!exported) {
             return report_error(exported.error(), false);
         }
         fmt::print("exported {}\n", export_output.string());
+        return 0;
+    }
+    if (*benchmark) {
+        auto configuration = load_configuration(benchmark_path);
+        if (!configuration) {
+            return report_error(configuration.error(), benchmark_json);
+        }
+        auto report = benchmark_configuration(configuration.value());
+        if (!report) {
+            return report_error(report.error(), benchmark_json);
+        }
+        auto written = write_benchmark_report(report.value(), benchmark_output);
+        if (!written) {
+            return report_error(written.error(), benchmark_json);
+        }
+        fmt::print("{}", format_report(report.value(), benchmark_json));
         return 0;
     }
     return 1;

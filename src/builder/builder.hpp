@@ -63,6 +63,11 @@ struct ValidationReport {
     std::filesystem::path database_path;
     std::uint64_t tile_count{};
     std::uint32_t pack_count{};
+    bool full{};
+    std::uint64_t verified_projection_samples{};
+    std::uint64_t verified_scientific_tiles{};
+    std::uint64_t verified_provenance_tiles{};
+    std::uint64_t verified_hierarchy_tiles{};
     std::uint64_t verified_seams{};
 };
 
@@ -77,12 +82,73 @@ struct InspectionReport {
     std::optional<std::uint16_t> maximum_elevation_code;
     std::optional<std::uint32_t> primary_dataset_id;
     std::optional<std::uint8_t> channel_count;
+    std::optional<std::uint32_t> pack_id;
+    std::optional<std::uint64_t> payload_offset;
+    std::optional<std::uint32_t> stored_bytes;
+    std::optional<std::uint32_t> effective_resolution_millimeters;
+    std::optional<std::uint32_t> geometric_error_millimeters;
+    std::optional<std::uint8_t> materialized_child_mask;
+    std::optional<LunarTileKey> parent;
+    std::vector<LunarTileKey> children;
+    std::vector<DatasetId> contributing_datasets;
+    std::optional<std::uint8_t> quality_flags;
+    std::string content_hash_prefix;
+    std::string dependency_hash_prefix;
+};
+
+struct DiffReport {
+    std::filesystem::path before_path;
+    std::filesystem::path after_path;
+    bool dataset_registry_changed{};
+    bool builder_configuration_changed{};
+    bool package_layout_changed{};
+    std::vector<DatasetId> added_datasets;
+    std::vector<DatasetId> removed_datasets;
+    std::vector<LunarTileKey> added_tiles;
+    std::vector<LunarTileKey> removed_tiles;
+    std::vector<LunarTileKey> dependency_changes;
+    std::vector<LunarTileKey> content_changes;
+    std::vector<LunarTileKey> provenance_changes;
+    std::vector<LunarTileKey> package_layout_changes;
+
+    [[nodiscard]] bool identical() const noexcept;
 };
 
 enum class DiagnosticExportFormat : std::uint8_t {
+    ply,
+    obj,
+    elevation_pgm,
+    sample_csv,
+    raw_u16_le,
     provenance_ppm,
     quality_ppm,
     transition_csv,
+};
+
+struct BenchmarkReport {
+    std::string host_platform;
+    std::string compiler;
+    std::string build_configuration;
+    std::uint32_t worker_threads{};
+    Sha256Digest builder_configuration_hash;
+    std::uint64_t planned_tile_count{};
+    std::uint64_t sampled_core_vertices{};
+    std::uint64_t staging_io_bytes{};
+    std::uint64_t peak_resident_memory_bytes{};
+    std::uint64_t uncompressed_channel_bytes{};
+    std::uint64_t stored_pack_bytes{};
+    std::uint32_t pack_count{};
+    std::uint64_t built_tile_count{};
+    std::uint64_t reused_tile_count{};
+    double catalog_seconds{};
+    double clean_build_seconds{};
+    double sampling_throughput_samples_per_second{};
+    double staging_io_mebibytes_per_second{};
+    double compression_ratio{};
+    double validation_seconds{};
+    double incremental_build_seconds{};
+    double incremental_reuse_ratio{};
+    bool deterministic_rebuild{};
 };
 
 [[nodiscard]] std::string_view version_string() noexcept;
@@ -104,10 +170,23 @@ enum class DiagnosticExportFormat : std::uint8_t {
 [[nodiscard]] Result<InspectionReport> inspect_database(
     const std::filesystem::path& path,
     std::optional<LunarTileKey> key);
+[[nodiscard]] Result<DiffReport> diff_databases(
+    const std::filesystem::path& before_path,
+    const std::filesystem::path& after_path);
+[[nodiscard]] Result<void> export_tile(
+    const std::filesystem::path& database_path,
+    LunarTileKey key,
+    DiagnosticExportFormat format,
+    const std::filesystem::path& output_path);
 [[nodiscard]] Result<void> export_tile_diagnostic(
     const std::filesystem::path& database_path,
     LunarTileKey key,
     DiagnosticExportFormat format,
+    const std::filesystem::path& output_path);
+[[nodiscard]] Result<BenchmarkReport> benchmark_configuration(
+    const BuilderConfiguration& configuration);
+[[nodiscard]] Result<void> write_benchmark_report(
+    const BenchmarkReport& report,
     const std::filesystem::path& output_path);
 
 [[nodiscard]] std::string format_report(const ScanReport& report, bool json);
@@ -115,5 +194,7 @@ enum class DiagnosticExportFormat : std::uint8_t {
 [[nodiscard]] std::string format_report(const BuildReport& report, bool json);
 [[nodiscard]] std::string format_report(const ValidationReport& report, bool json);
 [[nodiscard]] std::string format_report(const InspectionReport& report, bool json);
+[[nodiscard]] std::string format_report(const DiffReport& report, bool json);
+[[nodiscard]] std::string format_report(const BenchmarkReport& report, bool json);
 
 }  // namespace lunar::terrain::builder

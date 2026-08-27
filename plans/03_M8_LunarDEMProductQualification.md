@@ -6,7 +6,9 @@ M8 is a post-M7 qualification spike for the complete `LunarTerrainCore` and stan
 
 The milestone summary and acceptance in [`01_LunarTerrainCore_LunarTerrainBuilder_Implementation_Plan.md`](01_LunarTerrainCore_LunarTerrainBuilder_Implementation_Plan.md) control M8 scope. The architecture and scientific intent remain owned by [`01_LunarTerrainBuilder_Architecture_v0.3.md`](../specs/01_LunarTerrainBuilder_Architecture_v0.3.md), and the byte-level v1 contract remains owned by [`03_LunarTerrainDatabase_Format_v1.md`](../specs/03_LunarTerrainDatabase_Format_v1.md). This spike does not revise the frozen format or weaken any M0–M7 gate.
 
-M8 begins only after M7 acceptance is complete. Its required qualification profile uses hash-pinned NASA/PDS-first products over representative mid-latitude, SLDEM-coverage-boundary, and polar regions. A larger opt-in scale profile then exercises the same pipeline with the complete 32-tile SLDEM2015 set, a global coverage source, and selected regional refinements.
+M8 begins only after M7 acceptance is complete. Its required qualification profiles use hash-pinned NASA/PDS-first products over representative mid-latitude, SLDEM-coverage-boundary, and polar regions. A larger opt-in scale profile then exercises the same pipeline with the complete 32-tile SLDEM2015 set, a global coverage source, and selected regional refinements.
+
+The portable acquisition foundation is already present before M8. [`provisioning/provision.py`](../provisioning/provision.py) is the single Python 3.9+ standard-library entry point for Windows and Linux, and [`provisioning/provisioning.json`](../provisioning/provisioning.json) is its schema-versioned product, bundle, and profile lock. The current `Artifact` and `Fullset` profiles preserve the established SLDEM2015 behavior and pinned three-member artifact identity. This completed tooling refactor does not begin M8; M8 extends the existing entry point and lock only after each additional product passes preflight.
 
 ## Intended result
 
@@ -27,8 +29,8 @@ Qualification does not require every candidate product to succeed. It requires a
 
 One M8 run follows this path:
 
-1. A developer selects the required-region or scale provisioning profile and supplies external dataset roots.
-2. Provisioning downloads or reuses the exact declared members, resumes through temporary `.part` files, verifies upstream checksums where available, computes project SHA-256 values and canonical artifact-bundle identities, and makes verified source members read-only.
+1. A developer runs a named product/bundle provisioning profile for each required source and supplies that product's external root through `--root` or its configured environment variable. These acquisition profiles are distinct from the multi-source Builder Profiles A–C and scale profile below.
+2. `provision.py` loads the adjacent JSON lock by default, or an explicitly supplied `--config` file, then downloads or reuses the exact declared members, resumes through temporary `.part` files, verifies upstream checksums where available, computes project SHA-256 values and declared canonical artifact-bundle identities, and makes verified source members read-only. `--verify-only` performs the same identity checks without any network request.
 3. A preflight uses the same GDAL/PROJ-capable Builder environment that will perform the build to validate raster access, projection/frame, bounds, dimensions, sample representation, no-data, and required sidecars or quality companions.
 4. `scan` and `plan` construct the ordered source registry, coverage index, source-dependent target levels, and connected sparse tile set. Advertised pixel spacing is evidence, not a substitute for effective-resolution qualification.
 5. `build` samples and fuses sources in configured priority/DatasetID order, resolves seams, quantizes, generates aprons and auxiliary channels, uses the incremental cache, and transactionally publishes `.ltdb/.ltp` outputs.
@@ -41,7 +43,7 @@ Acquisition remains separate from terrain builds. A build never downloads a sour
 
 ### In scope
 
-- Extend `provisioning/` for the selected LOLA, SLDEM2015, LROC NAC, and polar product bundles on Windows and Linux.
+- Extend the portable `provision.py` and `provisioning.json` contract with locked LOLA, SLDEM2015, LROC NAC, and polar product bundles, then verify the same entry point on Windows and Linux.
 - Add external-data configurations and opt-in acceptance/benchmark workflows for the required regions and scale profile.
 - Exercise existing M0–M7 capabilities with multiple real sources, projections, resolutions, footprints, no-data patterns, and quality companions.
 - Make scoped Core, Builder, test, and provisioning corrections needed to honor existing architecture, format, fusion, hierarchy, validation, and tooling contracts.
@@ -100,7 +102,7 @@ Expected levels are validation hypotheses. The M6 rule remains authoritative: ch
 
 The scale profile uses:
 
-- all 32 SLDEM2015 512-ppd elevation tiles and their 64 official sidecars already supported by `download-sldem2015` `Fullset` mode;
+- all 32 SLDEM2015 512-ppd elevation tiles and their 64 official sidecars already selected by the `Fullset` profile in `provisioning.json`;
 - the qualified global LOLA coverage foundation;
 - the qualified Maskelyne refinement; and
 - the qualified south-polar elevation and quality bundle.
@@ -124,32 +126,43 @@ These candidates may receive a feasibility note, but automated acquisition or Bu
 
 ## Provisioning tooling
 
-Extend the existing Windows and Linux provisioning entrypoints rather than placing acquisition inside `lunar-terrain`. The implementation may use shared data-driven manifests or product-specific wrappers, but the checked-in product lock data must have one authoritative representation so the two platforms cannot drift.
+Acquisition remains outside `lunar-terrain` and uses the existing [`provision.py`](../provisioning/provision.py) entry point on both platforms. Do not add PowerShell/Bash equivalents or product-specific wrappers. The script uses only the Python 3.9 standard library; `provisioning.json` is the one authoritative acquisition lock, so platform behavior and product identities cannot drift.
 
-Each locked product definition must contain or generate:
+The schema-version-1 baseline provides:
 
-- stable dataset key and provenance URI, separate from machine-local roots;
-- official product and revision identifiers;
-- ordered source-relative artifact members;
-- required labels, metadata, confidence/count/effective-resolution/error companions, and their role;
-- byte counts, official checksums where available, computed SHA-256 values, canonical bundle byte total, and canonical bundle SHA-256;
-- expected GDAL driver/capability, raster type, dimensions, bands, projection/frame, bounds, datum/reference radius, sample scale/offset, and no-data representation;
-- source licensing/data-policy reference and any access constraint; and
-- a declared `required-region` or `scale` profile membership.
+- configurable retry count, timeout, streaming chunk size, and user agent;
+- products with a stable dataset key, archive revision, provenance URI, download base URL, and external-root environment variable;
+- optional member-specific source URLs, byte counts, MD5/SHA-256 values, and roles for elevation, labels, metadata, and quality companions;
+- upstream PDS-style MD5 manifests, with an optional pinned manifest SHA-256;
+- ordered bundles with a declared byte total, optional upstream manifest, canonical hash domain and SHA-256, and optional generated SHA-256 manifest; and
+- case-insensitive named profiles that select one product's download bundle and the bundle identities that must be verified.
 
-Provisioning behavior must preserve the established M3 guarantees:
+Provisioning profiles remain product/bundle acquisition units. A required-region or scale workflow invokes the necessary acquisition profiles separately, with one external root per invocation, then combines those roots through the Builder semantic configurations. Do not turn `provisioning.json` into Builder orchestration or duplicate scientific fusion policy there.
 
-- require explicit external roots and reject filesystem roots;
-- use resumable `.part` downloads and atomic rename on success;
-- never overwrite or delete an already verified member implicitly;
-- reject missing members, size/checksum drift, incomplete transfers, and unexpected archive revisions;
-- compute project SHA-256 values even when the archive publishes another checksum;
-- verify the canonical artifact-bundle identity used by the Builder;
-- make verified original members read-only;
-- keep checksum manifests, generated aliases, clipped test windows, directory metadata, and temporary files outside the original artifact bundle unless explicitly declared; and
-- provide a verification-only mode that performs no download when all members are present.
+Each concern has one defining location:
 
-If an archive cannot be automated because it requires authentication, interactive acceptance, or unstable generated URLs, classify it as deferred rather than embedding credentials, session state, or unpinned discovery in the tooling.
+- `provisioning.json` owns acquisition identity and behavior: dataset key, archive revision, provenance/download location, external-root environment name, ordered original members and roles, byte counts, published and project checksums, bundle totals and canonical identities, checksum-manifest handling, and provisioning-profile membership;
+- Builder semantic configuration owns the source metadata needed for canonical builds and publication: product/producer/mission/instrument/version/license strings, GDAL driver/capability expectations, raster type, dimensions, bands, projection/frame, bounds, datum/reference radius, sample scale/offset, no-data interpretation, effective resolution, priorities, and fusion/quality policy; and
+- the qualification record owns cited licensing/data-policy evidence, access constraints, authoritative metadata evidence, spot checks, limitations, and accepted or rejected status.
+
+Builder semantic configuration also carries the stable key, provenance URI, ordered artifact members, byte counts, SHA-256 values, and bundle identity required by the Builder's canonical input contract. Derive those repeated values from the acquisition lock or verify their exact agreement with a focused consistency check; do not maintain an unchecked second product identity. An archive revision and a published scientific product version may use different identifiers, but both must be explicit and supported by the qualification evidence.
+
+M8 may extend the versioned JSON schema and its validation only when a qualified required product needs an acquisition fact or archive behavior that schema version 1 cannot represent. Keep a compatible schema version when adding ordinary products, members, bundles, or profiles already supported by the current contract. A new manifest syntax or archive transport requires focused parser/schema tests; authentication, interactive acceptance, archive extraction, generated discovery, or another materially different lifecycle requires an explicit design decision before implementation.
+
+All extensions preserve the established behavior:
+
+- require an external root through `--root` or the product's configured environment variable, resolve it, and reject filesystem roots and configured paths that escape it;
+- validate the full JSON configuration before accessing an external root, rejecting unknown fields, unsafe paths, duplicate members, unresolved references, unpinned members, and canonical identities inconsistent with configured member order, sizes, or SHA-256 values;
+- stream new downloads through neighboring `.part` files, resume with HTTP range requests, reject a server that ignores or misstates the requested range, and atomically rename only a completed transfer;
+- never overwrite or delete an existing final member; verify it in place and require explicit operator removal after a reported mismatch;
+- reject missing members, size/checksum drift, undeclared or incomplete `.part` files, and unexpected archive revisions;
+- compute project SHA-256 values even when the archive publishes another checksum and verify every declared canonical artifact-bundle identity used by the Builder;
+- make verified original members read-only while keeping downloaded checksum manifests and generated SHA-256 manifests outside the original artifact bundle unless explicitly declared; and
+- make `--verify-only` prohibit all network requests, including retrieval of a missing upstream checksum manifest.
+
+The committed provisioning tests remain network-free and cover the locked SLDEM profile definitions, canonical member ordering, filesystem-root rejection, existing-file verification, corruption and incomplete-transfer rejection, PDS manifest parsing, and safe range resume. M8 extends this suite for each new schema behavior and product lock, then runs representative acquisition and verification with the same script on Windows and Linux.
+
+If an archive requires credentials or session state, unstable generated URLs, interactive acceptance, or an unsupported lifecycle that has not been explicitly approved, classify it as deferred rather than embedding those mechanisms in the tooling.
 
 ## Required real-data profiles
 
@@ -203,25 +216,28 @@ If the companion data show that a region is too interpolated to justify the nomi
 
 ### 1. Product preflight and lock
 
-- Confirm the required product URLs, revision identifiers, licensing, official checksums, exact source members, byte totals, and expected storage before adding acquisition automation.
+- Confirm the required product URLs, revision identifiers, licensing, official checksums, exact source members, byte totals, and expected storage before adding a product/bundle profile to `provisioning.json`.
 - Inspect every product with the Builder-linked GDAL stack and reconcile labels/metadata with authoritative product documentation.
+- Determine whether each archive fits the existing direct-HTTP, per-member checksum, and PDS-MD5-manifest contract. Raise any required schema or lifecycle decision before acquisition code changes.
 - Define source lineage and starting priority/policy without treating related LOLA-derived products as independent measurements.
 - Record exact spot-check coordinates and expected source values from the original products before fusion.
 
-Result: each required product has a reviewable locked definition or an explicit blocking qualification failure. Do not continue to pipeline testing with an unresolved datum, frame, no-data rule, or artifact identity.
+Result: each required product has reviewable acquisition-lock fields, Builder metadata expectations, and qualification evidence, or an explicit blocking qualification failure. Do not continue to provisioning or pipeline testing with an unresolved revision, datum, frame, no-data rule, archive lifecycle, or artifact identity.
 
 ### 2. Reproducible provisioning
 
-- Implement Windows and Linux acquisition/verification for the locked required-region members and scale set.
-- Reuse the existing SLDEM artifact and full-set behavior; do not duplicate or invalidate its pinned identities.
-- Verify clean acquisition, interrupted/resumed acquisition, verification-only reuse, corruption rejection, and upstream-revision rejection.
-- Document only portable external-root contracts; keep source bytes and machine-local locations out of git.
+- Add the preflight-approved products, members, bundles, and acquisition profiles to `provisioning.json`; extend `provision.py` only for approved archive behavior the existing schema cannot express.
+- Reuse the existing SLDEM `Artifact` and `Fullset` profiles. Preserve the three-member artifact identity and the full-set member order, total-byte check, official PDS MD5 verification, and generated SHA-256 manifest.
+- During SLDEM scale preflight, lock the remaining full-set per-member byte counts and SHA-256 values and declare its canonical bundle identity without changing the existing three-member artifact definition.
+- Add network-free tests for every new schema rule and archive parser, then verify clean acquisition, interrupted/resumed acquisition, strict no-network reuse, corruption rejection, and upstream-revision rejection with the same CLI contract on Windows and Linux.
+- Document only portable `--root`, configured environment-variable, `--config`, and `--verify-only` contracts; keep source bytes and machine-local locations out of git.
 
-Result: another developer can provision byte-identical required inputs from the authoritative archives and receive the same artifact-bundle identities.
+Result: another developer can use the same Python entry point and checked-in lock on Windows or Linux to provision byte-identical required inputs and receive the same artifact-bundle identities.
 
 ### 3. Qualification configurations and diagnostics
 
 - Add real multi-source semantic configurations for Profiles A–C and a separate scale profile.
+- Populate the Builder's repeated stable-key, provenance, artifact-member, byte-count, SHA-256, and bundle-identity fields from the accepted acquisition locks, and add a focused consistency check that prevents the provisioning and Builder identities from drifting.
 - Preserve local paths, job counts, output, cache, and staging locations outside semantic identity as required by format v1.
 - Map accepted source quality companions to existing v1 quality meanings and record unsupported source flags rather than silently dropping or redefining them.
 - Add or extend diagnostic exports only where M7 tooling cannot expose the required elevation differences, derivatives, provenance, quality, effective level, or source-coverage evidence.
@@ -253,7 +269,10 @@ Result: M8 has a reproducible evidence package and a bounded qualified source st
 ### Provisioning and source integrity
 
 - Exact member counts, relative paths, byte counts, upstream checksums, SHA-256 values, bundle totals, and bundle hashes match the locked definitions.
-- Missing sidecars, `.part` files, corrupted members, archive drift, wrong roots, and unsafe root targets fail before Builder execution.
+- The same `provision.py` entry point and checked-in JSON lock reproduce each required identity on Windows and Linux; no platform-specific acquisition wrapper participates.
+- `--verify-only` makes no network request. Missing members or required upstream checksum manifests fail instead of being fetched.
+- Invalid configuration, missing sidecars, `.part` files, corrupted members, archive drift, wrong roots, unsafe root targets, and servers that do not honor resume ranges fail before Builder execution.
+- Every Builder source definition agrees with its acquisition lock on stable key, provenance URI, ordered artifact members, byte counts, SHA-256 values, bundle total, and bundle hash.
 - GDAL driver, raster type, dimensions, projection/frame, bounds, datum, scale/offset, and no-data match the declared source metadata.
 
 ### Scientific behavior
@@ -292,8 +311,8 @@ Result: M8 has a reproducible evidence package and a bounded qualified source st
 
 M8 implementation produces:
 
-- portable provisioning/verification support for the required NASA/PDS-first products and profiles;
-- locked source definitions with exact artifact identities and metadata expectations;
+- extensions to the existing portable Python provisioning/verification entry point and JSON lock for the required NASA/PDS-first product bundles and acquisition profiles;
+- locked acquisition definitions with exact artifact identities, paired Builder metadata expectations, and qualification evidence;
 - opt-in required-region and scale configurations/workflows;
 - scientific, provenance, quality, hierarchy, determinism, and operator-path acceptance coverage;
 - a reproducible benchmark result for the required regions and at least one scale run; and
@@ -306,7 +325,7 @@ Source rasters, `.ltdb`, `.ltp`, `.ltbuild`, generated aliases, clipped rasters,
 M8 is complete when all of the following hold:
 
 - M7 acceptance remains green and its controlled golden, generated-raster, synthetic, and single-source SLDEM tests remain unchanged except for compatible additions.
-- The required LOLA foundation, SLDEM backbone, Maskelyne NAC refinement, and south-polar LOLA bundle are externally provisioned from locked definitions and reproduce their declared artifact identities on Windows and Linux.
+- The required LOLA foundation, SLDEM backbone, Maskelyne NAC refinement, and south-polar LOLA bundle are externally provisioned from locked definitions and reproduce their declared artifact identities through the same `provision.py` and checked-in JSON lock on Windows and Linux, including strict no-network verification-only reuse.
 - Profiles A–C complete the full Builder/Core/operator flow and pass structural, scientific, seam, hierarchy, provenance, quality, publication, and deterministic-rebuild validation.
 - Each required pairing has an evidence-backed configured fusion policy and declared effective-resolution treatment; no product is accepted solely from visual output or advertised pixel spacing.
 - Same-platform clean repeats and reordered-source builds are byte-identical, and incremental builds converge with clean builds.
@@ -318,6 +337,7 @@ Failure of a candidate does not fail M8 when the bounded required terrain roles 
 ## Assumptions and locked defaults
 
 - M8 is a post-M7 spike; it does not begin while M5–M7 implementation or acceptance remains incomplete.
+- The portable Python provisioning foundation and locked SLDEM `Artifact`/`Fullset` profiles predate M8 and do not start the spike. M8 extends them only after product preflight; it does not restore platform-specific entry points.
 - The required gate is the three representative real-data profiles. The larger scale profile is opt-in and must be run once, but is not an ordinary CI gate.
 - NASA/PDS and NASA GSFC products form the mandatory first source set. JAXA and CNSA candidates remain non-gating qualification opportunities.
 - LOLA supplies global coverage, SLDEM2015 is the preferred ±60° backbone, and qualified NAC/polar products supply sparse refinements.

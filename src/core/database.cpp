@@ -1699,6 +1699,36 @@ const DatabaseHeader& LunarTerrainDatabase::Header() const noexcept {
     return impl_->state.header;
 }
 
+std::vector<DatasetId> LunarTerrainDatabase::DatasetIds() const {
+    std::vector<DatasetId> result;
+    result.reserve(impl_->state.dataset_ids.size());
+    for (const std::uint32_t id : impl_->state.dataset_ids) {
+        result.push_back(DatasetId{id});
+    }
+    return result;
+}
+
+std::vector<DatabasePackEntry> LunarTerrainDatabase::Packs() const {
+    std::vector<DatabasePackEntry> result;
+    result.reserve(impl_->state.packs.size());
+    for (const PackInfo& pack : impl_->state.packs) {
+        result.push_back(DatabasePackEntry{
+            pack.id,
+            pack.relative_path,
+            pack.tile_count,
+            pack.file_bytes,
+            pack.first_key,
+            pack.last_key,
+            pack.hash,
+        });
+    }
+    return result;
+}
+
+std::vector<TileIndexEntry> LunarTerrainDatabase::TileIndex() const {
+    return impl_->state.index;
+}
+
 std::optional<TileIndexEntry> LunarTerrainDatabase::FindTile(const LunarTileKey key) const {
     const auto found = std::ranges::lower_bound(
         impl_->state.index, key, {}, &TileIndexEntry::key);

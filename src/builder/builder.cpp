@@ -4,8 +4,10 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <cmath>
 #include <filesystem>
 #include <map>
+#include <set>
 #include <optional>
 #include <span>
 #include <string>
@@ -21,6 +23,7 @@
 #include <lunar/terrain/error.hpp>
 #include <lunar/terrain/format.hpp>
 #include <lunar/terrain/format_v1.hpp>
+#include <lunar/terrain/qsc_projection.hpp>
 #include <lunar/terrain/qsc_topology.hpp>
 
 #include "builder/hierarchy.hpp"
@@ -84,6 +87,20 @@ namespace {
     return static_cast<std::uint16_t>(
         std::to_integer<std::uint16_t>(bytes[offset]) |
         (std::to_integer<std::uint16_t>(bytes[offset + 1U]) << 8U));
+}
+
+template <std::size_t Size>
+[[nodiscard]] std::string bytes_to_hex(const std::array<std::byte, Size>& bytes) {
+    constexpr std::array digits{
+        '0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'a', 'b', 'c', 'd', 'e', 'f'};
+    std::string result;
+    result.reserve(Size * 2U);
+    for (const std::byte byte : bytes) {
+        const std::uint8_t value = std::to_integer<std::uint8_t>(byte);
+        result.push_back(digits[value >> 4U]);
+        result.push_back(digits[value & 0x0FU]);
+    }
+    return result;
 }
 
 [[nodiscard]] std::size_t serialized_edge_index(
@@ -223,6 +240,121 @@ namespace {
         }
     }
     return Result<void>::success();
+}
+
+[[nodiscard]] Result<std::uint64_t> validate_projection(
+    const std::filesystem::path& path) {
+    constexpr std::array samples{
+        std::array{-0.875, -0.625},
+        std::array{-0.5, 0.25},
+        std::array{0.0, 0.0},
+        std::array{0.375, -0.75},
+        std::array{0.8125, 0.6875},
+    };
+    std::uint64_t verified = 0;
+    for (std::uint8_t face = 0; face < 6; ++face) {
+        for (const auto& sample : samples) {
+            const QscCoordinate qsc{
+                static_cast<QscFace>(face), sample[0], sample[1], 123.5};
+            auto geographic = QscProjection::Inverse(qsc);
+            if (!geographic) {
+                return Result<std::uint64_t>::failure(std::move(geographic).error());
+            }
+            auto round_trip = QscProjection::Forward(geographic.value());
+            if (!round_trip) {
+                return Result<std::uint64_t>::failure(std::move(round_trip).error());
+            }
+            if (round_trip.value().face != qsc.face ||
+                std::abs(round_trip.value().u - qsc.u) > 5.0e-13 ||
+                std::abs(round_trip.value().v - qsc.v) > 5.0e-13 ||
+                round_trip.value().elevation_meters != qsc.elevation_meters) {
+                return Result<std::uint64_t>::failure(validation_error(
+                    "deterministic QSC projection round trip exceeded tolerance", path));
+            }
+            ++verified;
+        }
+    }
+    return Result<std::uint64_t>::success(verified);
+}
+
+struct ScientificValidationCounts {
+    std::uint64_t scientific_tiles{};
+    std::uint64_t provenance_tiles{};
+};
+
+[[nodiscard]] Result<ScientificValidationCounts> validate_scientific_content(
+    const std::vector<std::pair<TileIndexEntry, DecodedTerrainTile>>& tiles,
+    const std::span<const DatasetId> datasets,
+    const std::filesystem::path& path) {
+    std::set<std::uint32_t> dataset_ids;
+    for (const DatasetId dataset : datasets) {
+        dataset_ids.insert(dataset.value);
+    }
+
+    ScientificValidationCounts counts;
+    for (const auto& [entry, tile] : tiles) {
+        const DecodedChannel* elevation = elevation_channel(tile);
+        const auto& metadata = tile.metadata();
+        const std::size_t elevation_bytes =
+            std::size_t{format_v1::serialized_elevation_samples} *
+            format_v1::serialized_elevation_samples * 2U;
+        if (elevation == nullptr ||
+            elevation->width() != format_v1::serialized_elevation_samples ||
+            elevation->height() != format_v1::serialized_elevation_samples ||
+            elevation->element_type() != ElementType::u16 ||
+            elevation->bytes().size() != elevation_bytes ||
+            !std::isfinite(metadata.effective_resolution_meters) ||
+            metadata.effective_resolution_meters <= 0.0F ||
+            !std::isfinite(metadata.geometric_error_meters) ||
+            metadata.geometric_error_meters < 0.0F ||
+            !std::isfinite(metadata.minimum_elevation_meters) ||
+            !std::isfinite(metadata.maximum_elevation_meters) ||
+            metadata.minimum_elevation_meters > metadata.maximum_elevation_meters ||
+            !dataset_ids.contains(metadata.primary_dataset.value)) {
+            return Result<ScientificValidationCounts>::failure(validation_error(
+                "tile scientific values or canonical elevation dimensions are invalid", path, entry.key));
+        }
+        ++counts.scientific_tiles;
+
+        if (!tile.provenance() || tile.provenance()->palette.empty()) {
+            return Result<ScientificValidationCounts>::failure(validation_error(
+                "tile omits required provenance", path, entry.key));
+        }
+        const TileProvenance& provenance = *tile.provenance();
+        const bool has_map = !provenance.dominant_source_indices.empty();
+        if ((has_map &&
+             (provenance.map_width != format_v1::auxiliary_map_samples ||
+              provenance.map_height != format_v1::auxiliary_map_samples ||
+              provenance.dominant_source_indices.size() !=
+                  std::size_t{format_v1::auxiliary_map_samples} *
+                      format_v1::auxiliary_map_samples)) ||
+            (!has_map && (provenance.map_width != 0 || provenance.map_height != 0))) {
+            return Result<ScientificValidationCounts>::failure(validation_error(
+                "provenance map dimensions are not canonical", path, entry.key));
+        }
+        for (const ProvenancePaletteEntry& palette_entry : provenance.palette) {
+            if (!dataset_ids.contains(palette_entry.dataset_id.value)) {
+                return Result<ScientificValidationCounts>::failure(validation_error(
+                    "provenance palette references an unknown DatasetID", path, entry.key));
+            }
+        }
+        const auto quality = std::ranges::find_if(
+            tile.channels(), [](const DecodedChannel& channel) {
+                return channel.id() == ChannelId::quality;
+            });
+        if (quality != tile.channels().end() &&
+            (quality->width() != format_v1::auxiliary_map_samples ||
+             quality->height() != format_v1::auxiliary_map_samples ||
+             quality->element_type() != ElementType::u8 ||
+             quality->bytes().size() !=
+                 std::size_t{format_v1::auxiliary_map_samples} *
+                     format_v1::auxiliary_map_samples)) {
+            return Result<ScientificValidationCounts>::failure(validation_error(
+                "quality map dimensions are not canonical", path, entry.key));
+        }
+        ++counts.provenance_tiles;
+    }
+    return Result<ScientificValidationCounts>::success(counts);
 }
 
 }  // namespace
@@ -378,12 +510,29 @@ Result<ValidationReport> validate_database(
     if (!tiles) {
         return Result<ValidationReport>::failure(std::move(tiles).error());
     }
+    std::uint64_t projection_samples = 0;
+    std::uint64_t scientific_tiles = 0;
+    std::uint64_t provenance_tiles = 0;
+    std::uint64_t hierarchy_tiles = 0;
     std::uint64_t seams = 0;
     if (full) {
+        auto projection = validate_projection(path);
+        if (!projection) {
+            return Result<ValidationReport>::failure(std::move(projection).error());
+        }
+        projection_samples = projection.value();
+        const std::vector<DatasetId> datasets = database.value().DatasetIds();
+        auto scientific = validate_scientific_content(tiles.value(), datasets, path);
+        if (!scientific) {
+            return Result<ValidationReport>::failure(std::move(scientific).error());
+        }
+        scientific_tiles = scientific.value().scientific_tiles;
+        provenance_tiles = scientific.value().provenance_tiles;
         auto hierarchy = validate_hierarchy(tiles.value(), path);
         if (!hierarchy) {
             return Result<ValidationReport>::failure(std::move(hierarchy).error());
         }
+        hierarchy_tiles = tiles.value().size();
         auto validated = validate_seams(tiles.value(), path);
         if (!validated) {
             return Result<ValidationReport>::failure(std::move(validated).error());
@@ -394,6 +543,11 @@ Result<ValidationReport> validate_database(
         path,
         database.value().Header().tile_count,
         database.value().Header().pack_count,
+        full,
+        projection_samples,
+        scientific_tiles,
+        provenance_tiles,
+        hierarchy_tiles,
         seams,
     });
 }
@@ -429,6 +583,34 @@ Result<InspectionReport> inspect_database(
         report.maximum_elevation_code = entry->maximum_elevation_code;
         report.primary_dataset_id = entry->primary_dataset.value;
         report.channel_count = entry->channel_count;
+        report.pack_id = entry->pack_id.value;
+        report.payload_offset = entry->payload_offset;
+        report.stored_bytes = entry->stored_bytes;
+        report.effective_resolution_millimeters = entry->effective_resolution_millimeters;
+        report.geometric_error_millimeters = entry->geometric_error_millimeters;
+        report.materialized_child_mask = entry->materialized_child_mask;
+        report.parent = key->parent();
+        for (const TileIndexEntry& child : database.value().Children(*key)) {
+            report.children.push_back(child.key);
+        }
+        if (tile.value().provenance()) {
+            for (const ProvenancePaletteEntry& provenance : tile.value().provenance()->palette) {
+                report.contributing_datasets.push_back(provenance.dataset_id);
+            }
+        }
+        const auto quality = std::ranges::find_if(
+            tile.value().channels(), [](const DecodedChannel& channel) {
+                return channel.id() == ChannelId::quality;
+            });
+        if (quality != tile.value().channels().end()) {
+            std::uint8_t flags = 0;
+            for (const std::byte value : quality->bytes()) {
+                flags = static_cast<std::uint8_t>(flags | std::to_integer<std::uint8_t>(value));
+            }
+            report.quality_flags = flags;
+        }
+        report.content_hash_prefix = bytes_to_hex(entry->content_hash_prefix);
+        report.dependency_hash_prefix = bytes_to_hex(entry->dependency_hash_prefix);
     }
     return Result<InspectionReport>::success(std::move(report));
 }
@@ -588,18 +770,32 @@ std::string format_report(const BuildReport& report, const bool json) {
 std::string format_report(const ValidationReport& report, const bool json) {
     if (json) {
         return fmt::format(
-            "{{\"database_path\":{},\"pack_count\":{},\"status\":\"valid\","
-            "\"tile_count\":{},\"verified_seams\":{}}}\n",
+            "{{\"database_path\":{},\"full\":{},\"pack_count\":{},\"status\":\"valid\","
+            "\"tile_count\":{},\"verified_hierarchy_tiles\":{},"
+            "\"verified_projection_samples\":{},\"verified_provenance_tiles\":{},"
+            "\"verified_scientific_tiles\":{},\"verified_seams\":{}}}\n",
             json_string(report.database_path.string()),
+            report.full,
             report.pack_count,
             report.tile_count,
+            report.verified_hierarchy_tiles,
+            report.verified_projection_samples,
+            report.verified_provenance_tiles,
+            report.verified_scientific_tiles,
             report.verified_seams);
     }
     return fmt::format(
-        "valid: {}\ntiles: {}\npacks: {}\nverified seams: {}\n",
+        "valid: {}\nfull: {}\ntiles: {}\npacks: {}\nverified projection samples: {}\n"
+        "verified scientific tiles: {}\nverified provenance tiles: {}\n"
+        "verified hierarchy tiles: {}\nverified seams: {}\n",
         report.database_path.string(),
+        report.full ? "yes" : "no",
         report.tile_count,
         report.pack_count,
+        report.verified_projection_samples,
+        report.verified_scientific_tiles,
+        report.verified_provenance_tiles,
+        report.verified_hierarchy_tiles,
         report.verified_seams);
 }
 
@@ -607,14 +803,51 @@ std::string format_report(const InspectionReport& report, const bool json) {
     if (json) {
         std::string tile = "null";
         if (report.tile_key) {
+            std::string children;
+            for (std::size_t index = 0; index < report.children.size(); ++index) {
+                if (index != 0) {
+                    children.push_back(',');
+                }
+                children += json_string(report.children[index].to_string());
+            }
+            std::string datasets;
+            for (std::size_t index = 0; index < report.contributing_datasets.size(); ++index) {
+                if (index != 0) {
+                    datasets.push_back(',');
+                }
+                datasets += fmt::format("{}", report.contributing_datasets[index].value);
+            }
+            const std::string parent = report.parent
+                ? json_string(report.parent->to_string())
+                : "null";
+            const std::string quality = report.quality_flags
+                ? fmt::format("{}", *report.quality_flags)
+                : "null";
             tile = fmt::format(
-                "{{\"channel_count\":{},\"key\":{},\"maximum_elevation_code\":{},"
-                "\"minimum_elevation_code\":{},\"primary_dataset_id\":{}}}",
+                "{{\"channel_count\":{},\"children\":[{}],\"content_hash_prefix\":{},"
+                "\"contributing_dataset_ids\":[{}],\"dependency_hash_prefix\":{},"
+                "\"effective_resolution_millimeters\":{},\"geometric_error_millimeters\":{},"
+                "\"key\":{},\"materialized_child_mask\":{},\"maximum_elevation_code\":{},"
+                "\"minimum_elevation_code\":{},\"pack_id\":{},\"parent\":{},"
+                "\"payload_offset\":{},\"primary_dataset_id\":{},\"quality_flags\":{},"
+                "\"stored_bytes\":{}}}",
                 *report.channel_count,
+                children,
+                json_string(report.content_hash_prefix),
+                datasets,
+                json_string(report.dependency_hash_prefix),
+                *report.effective_resolution_millimeters,
+                *report.geometric_error_millimeters,
                 json_string(report.tile_key->to_string()),
+                *report.materialized_child_mask,
                 *report.maximum_elevation_code,
                 *report.minimum_elevation_code,
-                *report.primary_dataset_id);
+                *report.pack_id,
+                parent,
+                *report.payload_offset,
+                *report.primary_dataset_id,
+                quality,
+                *report.stored_bytes);
         }
         return fmt::format(
             "{{\"database_content_sha256\":{},\"database_path\":{},\"dataset_count\":{},"
@@ -635,12 +868,27 @@ std::string format_report(const InspectionReport& report, const bool json) {
         report.database_content_hash.to_hex());
     if (report.tile_key) {
         text += fmt::format(
-            "tile: {}\nchannels: {}\nelevation codes: {}..{}\nprimary dataset: {}\n",
+            "tile: {}\nparent: {}\nchildren: {}\nchannels: {}\nelevation codes: {}..{}\n"
+            "primary dataset: {}\ncontributing datasets: {}\npack/offset/bytes: {} / {} / {}\n"
+            "effective resolution: {} mm\ngeometric error: {} mm\nchild mask: {}\n"
+            "content hash prefix: {}\ndependency hash prefix: {}\nquality flags: {}\n",
             report.tile_key->to_string(),
+            report.parent ? report.parent->to_string() : "none",
+            report.children.size(),
             *report.channel_count,
             *report.minimum_elevation_code,
             *report.maximum_elevation_code,
-            *report.primary_dataset_id);
+            *report.primary_dataset_id,
+            report.contributing_datasets.size(),
+            *report.pack_id,
+            *report.payload_offset,
+            *report.stored_bytes,
+            *report.effective_resolution_millimeters,
+            *report.geometric_error_millimeters,
+            *report.materialized_child_mask,
+            report.content_hash_prefix,
+            report.dependency_hash_prefix,
+            report.quality_flags ? fmt::format("{}", *report.quality_flags) : "none");
     }
     return text;
 }

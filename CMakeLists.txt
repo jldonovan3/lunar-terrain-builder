@@ -90,6 +90,7 @@ target_sources(
         src/builder/fusion.hpp
         src/builder/hierarchy.cpp
         src/builder/hierarchy.hpp
+        src/builder/operators.cpp
         src/builder/packing.cpp
         src/builder/packing.hpp
         src/builder/raster_source.cpp
@@ -114,6 +115,9 @@ target_link_libraries(
         fmt::fmt
         ${lunar_terrain_zstd_target}
 )
+if(WIN32)
+    target_link_libraries(lunar_terrain_builder_lib PRIVATE Psapi)
+endif()
 lunar_terrain_set_warnings(lunar_terrain_builder_lib)
 lunar_terrain_enable_sanitizers(lunar_terrain_builder_lib)
 
@@ -159,6 +163,7 @@ if(LUNAR_TERRAIN_BUILD_TESTING)
         tests/builder/build_cache_tests.cpp
         tests/builder/fusion_tests.cpp
         tests/builder/hierarchy_tests.cpp
+        tests/builder/operator_tests.cpp
         tests/builder/packing_tests.cpp
         tests/builder/projection_oracle_tests.cpp
         tests/builder/raster_source_tests.cpp
@@ -236,5 +241,34 @@ if(LUNAR_TERRAIN_BUILD_TESTING)
         PROPERTIES
             FIXTURES_REQUIRED m2_cli_database
             PASS_REGULAR_EXPRESSION "\"channel_count\":2"
+    )
+    add_test(
+        NAME cli.diff
+        COMMAND lunar-terrain diff "${lunar_terrain_synthetic_database}"
+                "${lunar_terrain_synthetic_database}" --json
+    )
+    set_tests_properties(
+        cli.diff
+        PROPERTIES
+            FIXTURES_REQUIRED m2_cli_database
+            PASS_REGULAR_EXPRESSION "\"identical\":true"
+    )
+    add_test(
+        NAME cli.export
+        COMMAND lunar-terrain export "${lunar_terrain_synthetic_database}"
+                QSC/F4/L00/0000/0000 --format raw-u16
+                --output "${CMAKE_CURRENT_SOURCE_DIR}/out/m7-cli-elevation.u16"
+    )
+    set_tests_properties(cli.export PROPERTIES FIXTURES_REQUIRED m2_cli_database)
+    add_test(
+        NAME cli.benchmark
+        COMMAND lunar-terrain benchmark "${lunar_terrain_synthetic_config}"
+                --output "${CMAKE_CURRENT_SOURCE_DIR}/out/m7-cli-benchmark.json" --json
+    )
+    set_tests_properties(
+        cli.benchmark
+        PROPERTIES
+            FIXTURES_REQUIRED m2_cli_database
+            PASS_REGULAR_EXPRESSION "\"deterministic_rebuild\":true"
     )
 endif()

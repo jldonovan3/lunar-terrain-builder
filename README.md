@@ -51,6 +51,23 @@ lunar-terrain inspect out/m2-synthetic/MoonSynthetic.ltdb QSC/F0/L00/0000/0000 -
 `Builder` outputs six deterministic level-zero QSC face packs and the LTDB manifest.
 Generated `.ltdb`/`.ltp` outputs remain untracked build products.
 
+M7 completes the standalone operator path:
+
+```text
+lunar-terrain validate Moon.ltdb --full --json
+lunar-terrain inspect Moon.ltdb QSC/F0/L00/0000/0000 --json
+lunar-terrain diff Moon-before.ltdb Moon-after.ltdb --json
+lunar-terrain export Moon.ltdb QSC/F0/L00/0000/0000 --format ply --output tile.ply
+lunar-terrain benchmark lunar-terrain.toml --output benchmark.json --json
+```
+
+`diff` separately reports dataset-registry, dependency, decoded-content, provenance,
+and package-placement changes. Export formats are `ply`, `obj`, `elevation-pgm`,
+`csv`, `raw-u16`, `provenance-ppm`, `quality-ppm`, and `transition-csv`.
+The raw elevation product is the 257×257 core in explicit little-endian U16 order;
+the 16-bit PGM diagnostic raster uses the Netpbm-required big-endian sample order.
+Controlled M7 benchmark records and metric definitions live in `benchmarks/m7`.
+
 The SLDEM2015 P1 path is configured by
 `tests/data/sldem2015_p1.toml`. It catalogs and verifies the pinned raster
 artifact bundle, applies explicit datum and no-data rules, selects a fully
@@ -104,7 +121,8 @@ Unreal cook / IoStore
 ```
 
 ## SLDEM2015 Provisioning
-`/provisioning` provides PS and Bash scripts that curl either the single-tile test artifact, or the entire 32-tile dataset, from NASA PDS to a local directory that the pipeline reads through a pinned `SLDEM2015_ROOT` env variable.
+
+`provisioning/provision.py` is the standard-library Python 3.9+ entry point on Windows and Linux. Its adjacent `provisioning.json` contains the locked product, bundle, and profile definitions for the single-tile `Artifact` and 32-tile `Fullset` acquisitions. Pass the external destination with `--root` or `SLDEM2015_ROOT`; add `--verify-only` to prohibit network requests. See [`provisioning/provisioning.md`](provisioning/provisioning.md) for commands, integrity guarantees, and configuration guidance.
 
 ## SLDEM2015 Data Attribution
 Barker, M. K., Mazarico, E., Neumann, G. A., Zuber, M. T., Haruyama, J., Smith, D. E. "A new lunar digital elevation model from the Lunar Orbiter Laser Altimeter and SELENE Terrain Camera," Icarus, Volume 273, p. 346-355. http://dx.doi.org/10.1016/j.icarus.2015.07.039

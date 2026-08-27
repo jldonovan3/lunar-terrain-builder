@@ -2,12 +2,15 @@
 
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
+#include <numbers>
 #include <span>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include <fmt/format.h>
@@ -16,6 +19,7 @@
 #include <lunar/terrain/error.hpp>
 #include <lunar/terrain/format.hpp>
 #include <lunar/terrain/format_v1.hpp>
+#include <lunar/terrain/qsc_projection.hpp>
 
 #include "builder/fusion.hpp"
 
@@ -113,6 +117,262 @@ void append_text(std::vector<std::byte>& bytes, const std::string_view text) {
     return static_cast<std::uint16_t>(
         std::to_integer<std::uint16_t>(bytes[offset]) |
         (std::to_integer<std::uint16_t>(bytes[offset + 1U]) << 8U));
+}
+
+struct ExportVertex {
+    double x_meters{};
+    double y_meters{};
+    double z_meters{};
+    double latitude_radians{};
+    double longitude_radians{};
+    double elevation_meters{};
+    std::uint16_t elevation_code{};
+};
+
+struct ExportTriangle {
+    std::uint32_t first{};
+    std::uint32_t second{};
+    std::uint32_t third{};
+};
+
+[[nodiscard]] Result<std::vector<std::uint16_t>> core_elevation_codes(
+    const DecodedTerrainTile& tile) {
+    const DecodedChannel* elevation = find_channel(tile, ChannelId::elevation);
+    constexpr std::size_t serialized_samples =
+        std::size_t{format_v1::serialized_elevation_samples} *
+        format_v1::serialized_elevation_samples;
+    if (elevation == nullptr || elevation->bytes().size() != serialized_samples * 2U ||
+        elevation->width() != format_v1::serialized_elevation_samples ||
+        elevation->height() != format_v1::serialized_elevation_samples) {
+        return Result<std::vector<std::uint16_t>>::failure(Error{
+            ErrorCode::invalid_format,
+            "canonical ELEV channel is required for this export"});
+    }
+    std::vector<std::uint16_t> codes;
+    codes.reserve(
+        std::size_t{format_v1::core_vertices} * format_v1::core_vertices);
+    for (std::size_t y = 0; y < format_v1::core_vertices; ++y) {
+        for (std::size_t x = 0; x < format_v1::core_vertices; ++x) {
+            const std::size_t serialized_index =
+                (y + 1U) * format_v1::serialized_elevation_samples + x + 1U;
+            codes.push_back(read_u16(elevation->bytes(), serialized_index));
+        }
+    }
+    return Result<std::vector<std::uint16_t>>::success(std::move(codes));
+}
+
+[[nodiscard]] Result<std::vector<ExportVertex>> reconstruct_vertices(
+    const DecodedTerrainTile& tile,
+    const DatabaseHeader& header) {
+    auto codes = core_elevation_codes(tile);
+    if (!codes) {
+        return Result<std::vector<ExportVertex>>::failure(std::move(codes).error());
+    }
+    std::vector<ExportVertex> vertices;
+    vertices.reserve(codes.value().size());
+    const LunarTileKey key = tile.key();
+    for (std::uint16_t y = 0; y < format_v1::core_vertices; ++y) {
+        auto v = QscProjection::LatticeCoordinate(key.y(), y, key.level());
+        if (!v) {
+            return Result<std::vector<ExportVertex>>::failure(std::move(v).error());
+        }
+        for (std::uint16_t x = 0; x < format_v1::core_vertices; ++x) {
+            auto u = QscProjection::LatticeCoordinate(key.x(), x, key.level());
+            if (!u) {
+                return Result<std::vector<ExportVertex>>::failure(std::move(u).error());
+            }
+            auto geographic = QscProjection::Inverse(QscCoordinate{
+                static_cast<QscFace>(key.face()), u.value(), v.value(), 0.0});
+            if (!geographic) {
+                return Result<std::vector<ExportVertex>>::failure(std::move(geographic).error());
+            }
+            const std::size_t index = std::size_t{y} * format_v1::core_vertices + x;
+            const std::uint16_t code = codes.value()[index];
+            const double elevation =
+                header.elevation_origin_meters +
+                static_cast<double>(code) * header.elevation_step_meters;
+            const double radius = header.reference_radius_meters + elevation;
+            const double cos_latitude = std::cos(geographic.value().latitude_radians);
+            vertices.push_back(ExportVertex{
+                radius * cos_latitude * std::cos(geographic.value().longitude_radians),
+                radius * cos_latitude * std::sin(geographic.value().longitude_radians),
+                radius * std::sin(geographic.value().latitude_radians),
+                geographic.value().latitude_radians,
+                geographic.value().longitude_radians,
+                elevation,
+                code,
+            });
+        }
+    }
+    return Result<std::vector<ExportVertex>>::success(std::move(vertices));
+}
+
+[[nodiscard]] double outward_dot(
+    const ExportVertex& first,
+    const ExportVertex& second,
+    const ExportVertex& third) noexcept {
+    const double ab_x = second.x_meters - first.x_meters;
+    const double ab_y = second.y_meters - first.y_meters;
+    const double ab_z = second.z_meters - first.z_meters;
+    const double ac_x = third.x_meters - first.x_meters;
+    const double ac_y = third.y_meters - first.y_meters;
+    const double ac_z = third.z_meters - first.z_meters;
+    const double cross_x = ab_y * ac_z - ab_z * ac_y;
+    const double cross_y = ab_z * ac_x - ab_x * ac_z;
+    const double cross_z = ab_x * ac_y - ab_y * ac_x;
+    return cross_x * first.x_meters + cross_y * first.y_meters +
+           cross_z * first.z_meters;
+}
+
+[[nodiscard]] std::vector<ExportTriangle> mesh_triangles(
+    const std::span<const ExportVertex> vertices) {
+    std::vector<ExportTriangle> triangles;
+    triangles.reserve(
+        std::size_t{format_v1::tile_cells} * format_v1::tile_cells * 2U);
+    const auto add_outward = [&vertices, &triangles](
+                                 const std::uint32_t first,
+                                 const std::uint32_t second,
+                                 const std::uint32_t third) {
+        if (outward_dot(vertices[first], vertices[second], vertices[third]) >= 0.0) {
+            triangles.push_back(ExportTriangle{first, second, third});
+        } else {
+            triangles.push_back(ExportTriangle{first, third, second});
+        }
+    };
+    for (std::uint32_t y = 0; y < format_v1::tile_cells; ++y) {
+        for (std::uint32_t x = 0; x < format_v1::tile_cells; ++x) {
+            const std::uint32_t southwest = y * format_v1::core_vertices + x;
+            const std::uint32_t southeast = southwest + 1U;
+            const std::uint32_t northwest = southwest + format_v1::core_vertices;
+            const std::uint32_t northeast = northwest + 1U;
+            add_outward(southwest, southeast, northeast);
+            add_outward(southwest, northeast, northwest);
+        }
+    }
+    return triangles;
+}
+
+[[nodiscard]] Result<std::vector<std::byte>> ply_mesh(
+    const DecodedTerrainTile& tile,
+    const DatabaseHeader& header) {
+    auto vertices = reconstruct_vertices(tile, header);
+    if (!vertices) {
+        return Result<std::vector<std::byte>>::failure(std::move(vertices).error());
+    }
+    const std::vector<ExportTriangle> triangles = mesh_triangles(vertices.value());
+    std::vector<std::byte> bytes;
+    append_text(bytes, fmt::format(
+        "ply\nformat ascii 1.0\ncomment lunar-terrain deterministic tile export\n"
+        "element vertex {}\nproperty double x\nproperty double y\nproperty double z\n"
+        "property ushort elevation_u16\nelement face {}\n"
+        "property list uchar uint vertex_indices\nend_header\n",
+        vertices.value().size(),
+        triangles.size()));
+    for (const ExportVertex& vertex : vertices.value()) {
+        append_text(bytes, fmt::format(
+            "{:.17g} {:.17g} {:.17g} {}\n",
+            vertex.x_meters,
+            vertex.y_meters,
+            vertex.z_meters,
+            vertex.elevation_code));
+    }
+    for (const ExportTriangle& triangle : triangles) {
+        append_text(bytes, fmt::format(
+            "3 {} {} {}\n", triangle.first, triangle.second, triangle.third));
+    }
+    return Result<std::vector<std::byte>>::success(std::move(bytes));
+}
+
+[[nodiscard]] Result<std::vector<std::byte>> obj_mesh(
+    const DecodedTerrainTile& tile,
+    const DatabaseHeader& header) {
+    auto vertices = reconstruct_vertices(tile, header);
+    if (!vertices) {
+        return Result<std::vector<std::byte>>::failure(std::move(vertices).error());
+    }
+    const std::vector<ExportTriangle> triangles = mesh_triangles(vertices.value());
+    std::vector<std::byte> bytes;
+    append_text(bytes, "# lunar-terrain deterministic Moon-centered tile export\n");
+    for (const ExportVertex& vertex : vertices.value()) {
+        append_text(bytes, fmt::format(
+            "v {:.17g} {:.17g} {:.17g}\n",
+            vertex.x_meters,
+            vertex.y_meters,
+            vertex.z_meters));
+    }
+    for (const ExportTriangle& triangle : triangles) {
+        append_text(bytes, fmt::format(
+            "f {} {} {}\n",
+            triangle.first + 1U,
+            triangle.second + 1U,
+            triangle.third + 1U));
+    }
+    return Result<std::vector<std::byte>>::success(std::move(bytes));
+}
+
+[[nodiscard]] Result<std::vector<std::byte>> elevation_pgm(
+    const DecodedTerrainTile& tile) {
+    auto codes = core_elevation_codes(tile);
+    if (!codes) {
+        return Result<std::vector<std::byte>>::failure(std::move(codes).error());
+    }
+    std::vector<std::byte> bytes;
+    append_text(bytes, fmt::format(
+        "P5\n{} {}\n65535\n", format_v1::core_vertices, format_v1::core_vertices));
+    bytes.reserve(bytes.size() + codes.value().size() * 2U);
+    for (const std::uint16_t code : codes.value()) {
+        bytes.push_back(static_cast<std::byte>(code >> 8U));
+        bytes.push_back(static_cast<std::byte>(code & 0xFFU));
+    }
+    return Result<std::vector<std::byte>>::success(std::move(bytes));
+}
+
+[[nodiscard]] Result<std::vector<std::byte>> raw_elevation_u16_le(
+    const DecodedTerrainTile& tile) {
+    auto codes = core_elevation_codes(tile);
+    if (!codes) {
+        return Result<std::vector<std::byte>>::failure(std::move(codes).error());
+    }
+    std::vector<std::byte> bytes;
+    bytes.reserve(codes.value().size() * 2U);
+    for (const std::uint16_t code : codes.value()) {
+        bytes.push_back(static_cast<std::byte>(code & 0xFFU));
+        bytes.push_back(static_cast<std::byte>(code >> 8U));
+    }
+    return Result<std::vector<std::byte>>::success(std::move(bytes));
+}
+
+[[nodiscard]] Result<std::vector<std::byte>> sample_csv(
+    const DecodedTerrainTile& tile,
+    const DatabaseHeader& header) {
+    auto vertices = reconstruct_vertices(tile, header);
+    if (!vertices) {
+        return Result<std::vector<std::byte>>::failure(std::move(vertices).error());
+    }
+    std::vector<std::byte> bytes;
+    append_text(
+        bytes,
+        "sample_x,sample_y,latitude_degrees,longitude_degrees,elevation_m,elevation_u16,"
+        "moon_x_m,moon_y_m,moon_z_m\n");
+    constexpr double radians_to_degrees = 180.0 / std::numbers::pi_v<double>;
+    for (std::uint32_t y = 0; y < format_v1::core_vertices; ++y) {
+        for (std::uint32_t x = 0; x < format_v1::core_vertices; ++x) {
+            const ExportVertex& vertex =
+                vertices.value()[std::size_t{y} * format_v1::core_vertices + x];
+            append_text(bytes, fmt::format(
+                "{},{},{:.17g},{:.17g},{:.17g},{},{:.17g},{:.17g},{:.17g}\n",
+                x,
+                y,
+                vertex.latitude_radians * radians_to_degrees,
+                vertex.longitude_radians * radians_to_degrees,
+                vertex.elevation_meters,
+                vertex.elevation_code,
+                vertex.x_meters,
+                vertex.y_meters,
+                vertex.z_meters));
+        }
+    }
+    return Result<std::vector<std::byte>>::success(std::move(bytes));
 }
 
 [[nodiscard]] Result<std::vector<std::byte>> provenance_image(
@@ -219,7 +479,7 @@ void append_text(std::vector<std::byte>& bytes, const std::string_view text) {
 
 }  // namespace
 
-Result<void> export_tile_diagnostic(
+Result<void> export_tile(
     const std::filesystem::path& database_path,
     const LunarTileKey key,
     const DiagnosticExportFormat format,
@@ -234,6 +494,16 @@ Result<void> export_tile_diagnostic(
     }
     Result<std::vector<std::byte>> output = [&]() {
         switch (format) {
+            case DiagnosticExportFormat::ply:
+                return ply_mesh(tile.value(), database.value().Header());
+            case DiagnosticExportFormat::obj:
+                return obj_mesh(tile.value(), database.value().Header());
+            case DiagnosticExportFormat::elevation_pgm:
+                return elevation_pgm(tile.value());
+            case DiagnosticExportFormat::sample_csv:
+                return sample_csv(tile.value(), database.value().Header());
+            case DiagnosticExportFormat::raw_u16_le:
+                return raw_elevation_u16_le(tile.value());
             case DiagnosticExportFormat::provenance_ppm:
                 return provenance_image(tile.value());
             case DiagnosticExportFormat::quality_ppm:
@@ -250,6 +520,14 @@ Result<void> export_tile_diagnostic(
         return Result<void>::failure(std::move(error));
     }
     return write_output(output_path, output.value(), key);
+}
+
+Result<void> export_tile_diagnostic(
+    const std::filesystem::path& database_path,
+    const LunarTileKey key,
+    const DiagnosticExportFormat format,
+    const std::filesystem::path& output_path) {
+    return export_tile(database_path, key, format, output_path);
 }
 
 }  // namespace lunar::terrain::builder

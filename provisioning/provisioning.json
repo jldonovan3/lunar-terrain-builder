@@ -1,0 +1,183 @@
+{
+  "schema_version": 1,
+  "network": {
+    "retry_count": 5,
+    "timeout_seconds": 60,
+    "chunk_bytes": 1048576,
+    "user_agent": "LunarTerrainBuilder-provisioning/1"
+  },
+  "products": {
+    "sldem2015": {
+      "display_name": "SLDEM2015",
+      "dataset_key": "nasa.sldem2015.512ppd.v1",
+      "revision": "lrolol_1xxx_260615",
+      "provenance_uri": "https://pds-geosciences.wustl.edu/lro/lro-l-lola-3-rdr-v1/lrolol_1xxx/data/sldem2015/",
+      "root_environment": "SLDEM2015_ROOT",
+      "download_base_url": "https://pds-geosciences.wustl.edu/lro/lro-l-lola-3-rdr-v1/lrolol_1xxx/data/sldem2015/",
+      "members": {
+        "tiles/jp2/sldem2015_512_00n_30n_000_045.jp2": {
+          "bytes": 171864155,
+          "md5": "f009c232030ecd09e21dd67ebafdb02d",
+          "sha256": "8d6e9bb9687bd19dbc9de57c8044932540bb934e5ef557b473660f5056484a73",
+          "role": "elevation"
+        },
+        "tiles/jp2/sldem2015_512_00n_30n_000_045_aux.xml": {
+          "bytes": 3295,
+          "md5": "6268c2b44040867f5ddb58992f36f789",
+          "sha256": "c9c013daa77cfbbd68efb157c51198fda3aed157f0d5ebddaf1a94f9151faa71",
+          "role": "auxiliary-metadata"
+        },
+        "tiles/jp2/sldem2015_512_00n_30n_000_045_jp2.lbl": {
+          "bytes": 4940,
+          "md5": "d20e9cb11147652f301cc9f3e492a5ed",
+          "sha256": "4d8f5edd72cdc486cbe491741a588dc545b7b72baa4cfb0e34cae7389d6305e0",
+          "role": "detached-label"
+        }
+      },
+      "checksum_manifests": {
+        "pds-lrolol-1xxx-260615": {
+          "url": "https://pds-geosciences.wustl.edu/lro/lro-l-lola-3-rdr-v1/lrolol_1xxx_260615.md5",
+          "path": "pds-lrolol_1xxx_260615.md5",
+          "format": "pds_md5",
+          "member_path_prefix": "tiles/jp2/"
+        }
+      },
+      "bundles": {
+        "artifact": {
+          "description": "SLDEM2015 artifact",
+          "members": [
+            "tiles/jp2/sldem2015_512_00n_30n_000_045.jp2",
+            "tiles/jp2/sldem2015_512_00n_30n_000_045_aux.xml",
+            "tiles/jp2/sldem2015_512_00n_30n_000_045_jp2.lbl"
+          ],
+          "total_bytes": 171872390,
+          "canonical_bundle": {
+            "domain": "LTDB_ARTIFACT_BUNDLE_V1",
+            "sha256": "17810a5b1551a56b865f59c20ae2c78c6aa05112112c557f466e21e19d5b9351"
+          }
+        },
+        "fullset": {
+          "description": "32 SLDEM2015 tiles and their 64 sidecars",
+          "members": [
+            "tiles/jp2/sldem2015_512_00n_30n_000_045.jp2",
+            "tiles/jp2/sldem2015_512_00n_30n_000_045_aux.xml",
+            "tiles/jp2/sldem2015_512_00n_30n_000_045_jp2.lbl",
+            "tiles/jp2/sldem2015_512_00n_30n_045_090.jp2",
+            "tiles/jp2/sldem2015_512_00n_30n_045_090_aux.xml",
+            "tiles/jp2/sldem2015_512_00n_30n_045_090_jp2.lbl",
+            "tiles/jp2/sldem2015_512_00n_30n_090_135.jp2",
+            "tiles/jp2/sldem2015_512_00n_30n_090_135_aux.xml",
+            "tiles/jp2/sldem2015_512_00n_30n_090_135_jp2.lbl",
+            "tiles/jp2/sldem2015_512_00n_30n_135_180.jp2",
+            "tiles/jp2/sldem2015_512_00n_30n_135_180_aux.xml",
+            "tiles/jp2/sldem2015_512_00n_30n_135_180_jp2.lbl",
+            "tiles/jp2/sldem2015_512_00n_30n_180_225.jp2",
+            "tiles/jp2/sldem2015_512_00n_30n_180_225_aux.xml",
+            "tiles/jp2/sldem2015_512_00n_30n_180_225_jp2.lbl",
+            "tiles/jp2/sldem2015_512_00n_30n_225_270.jp2",
+            "tiles/jp2/sldem2015_512_00n_30n_225_270_aux.xml",
+            "tiles/jp2/sldem2015_512_00n_30n_225_270_jp2.lbl",
+            "tiles/jp2/sldem2015_512_00n_30n_270_315.jp2",
+            "tiles/jp2/sldem2015_512_00n_30n_270_315_aux.xml",
+            "tiles/jp2/sldem2015_512_00n_30n_270_315_jp2.lbl",
+            "tiles/jp2/sldem2015_512_00n_30n_315_360.jp2",
+            "tiles/jp2/sldem2015_512_00n_30n_315_360_aux.xml",
+            "tiles/jp2/sldem2015_512_00n_30n_315_360_jp2.lbl",
+            "tiles/jp2/sldem2015_512_30n_60n_000_045.jp2",
+            "tiles/jp2/sldem2015_512_30n_60n_000_045_aux.xml",
+            "tiles/jp2/sldem2015_512_30n_60n_000_045_jp2.lbl",
+            "tiles/jp2/sldem2015_512_30n_60n_045_090.jp2",
+            "tiles/jp2/sldem2015_512_30n_60n_045_090_aux.xml",
+            "tiles/jp2/sldem2015_512_30n_60n_045_090_jp2.lbl",
+            "tiles/jp2/sldem2015_512_30n_60n_090_135.jp2",
+            "tiles/jp2/sldem2015_512_30n_60n_090_135_aux.xml",
+            "tiles/jp2/sldem2015_512_30n_60n_090_135_jp2.lbl",
+            "tiles/jp2/sldem2015_512_30n_60n_135_180.jp2",
+            "tiles/jp2/sldem2015_512_30n_60n_135_180_aux.xml",
+            "tiles/jp2/sldem2015_512_30n_60n_135_180_jp2.lbl",
+            "tiles/jp2/sldem2015_512_30n_60n_180_225.jp2",
+            "tiles/jp2/sldem2015_512_30n_60n_180_225_aux.xml",
+            "tiles/jp2/sldem2015_512_30n_60n_180_225_jp2.lbl",
+            "tiles/jp2/sldem2015_512_30n_60n_225_270.jp2",
+            "tiles/jp2/sldem2015_512_30n_60n_225_270_aux.xml",
+            "tiles/jp2/sldem2015_512_30n_60n_225_270_jp2.lbl",
+            "tiles/jp2/sldem2015_512_30n_60n_270_315.jp2",
+            "tiles/jp2/sldem2015_512_30n_60n_270_315_aux.xml",
+            "tiles/jp2/sldem2015_512_30n_60n_270_315_jp2.lbl",
+            "tiles/jp2/sldem2015_512_30n_60n_315_360.jp2",
+            "tiles/jp2/sldem2015_512_30n_60n_315_360_aux.xml",
+            "tiles/jp2/sldem2015_512_30n_60n_315_360_jp2.lbl",
+            "tiles/jp2/sldem2015_512_30s_00s_000_045.jp2",
+            "tiles/jp2/sldem2015_512_30s_00s_000_045_aux.xml",
+            "tiles/jp2/sldem2015_512_30s_00s_000_045_jp2.lbl",
+            "tiles/jp2/sldem2015_512_30s_00s_045_090.jp2",
+            "tiles/jp2/sldem2015_512_30s_00s_045_090_aux.xml",
+            "tiles/jp2/sldem2015_512_30s_00s_045_090_jp2.lbl",
+            "tiles/jp2/sldem2015_512_30s_00s_090_135.jp2",
+            "tiles/jp2/sldem2015_512_30s_00s_090_135_aux.xml",
+            "tiles/jp2/sldem2015_512_30s_00s_090_135_jp2.lbl",
+            "tiles/jp2/sldem2015_512_30s_00s_135_180.jp2",
+            "tiles/jp2/sldem2015_512_30s_00s_135_180_aux.xml",
+            "tiles/jp2/sldem2015_512_30s_00s_135_180_jp2.lbl",
+            "tiles/jp2/sldem2015_512_30s_00s_180_225.jp2",
+            "tiles/jp2/sldem2015_512_30s_00s_180_225_aux.xml",
+            "tiles/jp2/sldem2015_512_30s_00s_180_225_jp2.lbl",
+            "tiles/jp2/sldem2015_512_30s_00s_225_270.jp2",
+            "tiles/jp2/sldem2015_512_30s_00s_225_270_aux.xml",
+            "tiles/jp2/sldem2015_512_30s_00s_225_270_jp2.lbl",
+            "tiles/jp2/sldem2015_512_30s_00s_270_315.jp2",
+            "tiles/jp2/sldem2015_512_30s_00s_270_315_aux.xml",
+            "tiles/jp2/sldem2015_512_30s_00s_270_315_jp2.lbl",
+            "tiles/jp2/sldem2015_512_30s_00s_315_360.jp2",
+            "tiles/jp2/sldem2015_512_30s_00s_315_360_aux.xml",
+            "tiles/jp2/sldem2015_512_30s_00s_315_360_jp2.lbl",
+            "tiles/jp2/sldem2015_512_60s_30s_000_045.jp2",
+            "tiles/jp2/sldem2015_512_60s_30s_000_045_aux.xml",
+            "tiles/jp2/sldem2015_512_60s_30s_000_045_jp2.lbl",
+            "tiles/jp2/sldem2015_512_60s_30s_045_090.jp2",
+            "tiles/jp2/sldem2015_512_60s_30s_045_090_aux.xml",
+            "tiles/jp2/sldem2015_512_60s_30s_045_090_jp2.lbl",
+            "tiles/jp2/sldem2015_512_60s_30s_090_135.jp2",
+            "tiles/jp2/sldem2015_512_60s_30s_090_135_aux.xml",
+            "tiles/jp2/sldem2015_512_60s_30s_090_135_jp2.lbl",
+            "tiles/jp2/sldem2015_512_60s_30s_135_180.jp2",
+            "tiles/jp2/sldem2015_512_60s_30s_135_180_aux.xml",
+            "tiles/jp2/sldem2015_512_60s_30s_135_180_jp2.lbl",
+            "tiles/jp2/sldem2015_512_60s_30s_180_225.jp2",
+            "tiles/jp2/sldem2015_512_60s_30s_180_225_aux.xml",
+            "tiles/jp2/sldem2015_512_60s_30s_180_225_jp2.lbl",
+            "tiles/jp2/sldem2015_512_60s_30s_225_270.jp2",
+            "tiles/jp2/sldem2015_512_60s_30s_225_270_aux.xml",
+            "tiles/jp2/sldem2015_512_60s_30s_225_270_jp2.lbl",
+            "tiles/jp2/sldem2015_512_60s_30s_270_315.jp2",
+            "tiles/jp2/sldem2015_512_60s_30s_270_315_aux.xml",
+            "tiles/jp2/sldem2015_512_60s_30s_270_315_jp2.lbl",
+            "tiles/jp2/sldem2015_512_60s_30s_315_360.jp2",
+            "tiles/jp2/sldem2015_512_60s_30s_315_360_aux.xml",
+            "tiles/jp2/sldem2015_512_60s_30s_315_360_jp2.lbl"
+          ],
+          "total_bytes": 5466757104,
+          "upstream_checksum_manifest": "pds-lrolol-1xxx-260615",
+          "sha256_manifest": "SLDEM2015_512ppd_SHA256SUMS.txt"
+        }
+      }
+    }
+  },
+  "profiles": {
+    "Artifact": {
+      "product": "sldem2015",
+      "download_bundle": "artifact",
+      "verify_bundles": [
+        "artifact"
+      ]
+    },
+    "Fullset": {
+      "product": "sldem2015",
+      "download_bundle": "fullset",
+      "verify_bundles": [
+        "artifact",
+        "fullset"
+      ]
+    }
+  }
+}
