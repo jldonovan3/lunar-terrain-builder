@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <cstddef>
 #include <filesystem>
 #include <fstream>
@@ -136,6 +137,77 @@ TEST_CASE("typed configuration excludes local execution settings from identity")
     REQUIRE_FALSE(invalid);
     CHECK(invalid.error().code == ErrorCode::invalid_argument);
     CHECK(invalid.error().message.find("unknown configuration key") != std::string::npos);
+}
+
+TEST_CASE("M8 logical raster bundles and required regions are semantic") {
+    TemporaryDirectory temporary;
+    const auto make_configuration = [](const std::string_view source_root) {
+        return std::string{R"toml([database]
+name = "M8Parser"
+
+[tiles]
+max_level = 12
+
+[region]
+west_longitude_degrees = 10.0
+east_longitude_degrees = 11.0
+south_latitude_degrees = -2.0
+north_latitude_degrees = 2.0
+
+[raster]
+stable_key = "example.m8.mosaic.v1"
+source_uri = "https://example.test/m8/"
+original_crs = "test lunar geographic"
+expected_data_type = "Int16"
+artifact_bundle_bytes = 2
+artifact_bundle_sha256 = "0000000000000000000000000000000000000000000000000000000000000000"
+artifact_members = [
+  { name = "a.tif", bytes = 1, sha256 = "0000000000000000000000000000000000000000000000000000000000000000" },
+  { name = "b.tif", bytes = 1, sha256 = "1111111111111111111111111111111111111111111111111111111111111111" },
+]
+raster_files = [
+  { member = "b.tif", expected_width = 8, expected_height = 8, west_longitude_degrees = 11.0, east_longitude_degrees = 12.0, south_latitude_degrees = -2.0, north_latitude_degrees = 2.0 },
+  { member = "a.tif", expected_width = 8, expected_height = 8, west_longitude_degrees = 10.0, east_longitude_degrees = 11.0, south_latitude_degrees = -2.0, north_latitude_degrees = 2.0 },
+]
+nominal_resolution_meters = 20.0
+effective_resolution_meters = 80.0
+source_no_data = nan
+sample_scale = 1.0
+elevation_representation = "elevation_meters"
+quality_mapping = "b.tif supplies lower-confidence evidence"
+quality_members = ["b.tif"]
+unsupported_quality_values = ["exact confidence magnitude"]
+source_root = ")toml"} + std::string{source_root} + R"toml("
+)toml";
+    };
+    const auto first_path = temporary.path() / "m8-first.toml";
+    const auto second_path = temporary.path() / "m8-second.toml";
+    write_text(first_path, make_configuration("source-a"));
+    write_text(second_path, make_configuration("source-b"));
+
+    auto first = load_configuration(first_path);
+    auto second = load_configuration(second_path);
+    REQUIRE(first);
+    REQUIRE(second);
+    REQUIRE(first.value().required_region);
+    REQUIRE(first.value().rasters.size() == 1);
+    const RasterConfiguration& raster = first.value().rasters.front();
+    REQUIRE(raster.raster_files.size() == 2);
+    CHECK(raster.raster_files.front().member == "a.tif");
+    CHECK(std::isnan(raster.source_no_data));
+    CHECK(raster.quality_members == std::vector<std::string>{"b.tif"});
+
+    auto first_identity = identify_configuration(first.value());
+    auto second_identity = identify_configuration(second.value());
+    REQUIRE(first_identity);
+    REQUIRE(second_identity);
+    CHECK(first_identity.value().semantic_hash == second_identity.value().semantic_hash);
+    CHECK(first_identity.value().canonical_semantic_json.find("required_region_degrees") !=
+          std::string::npos);
+    CHECK(first_identity.value().canonical_semantic_json.find("raster_files") !=
+          std::string::npos);
+    CHECK(first_identity.value().canonical_semantic_json.find("\"source_no_data\":\"nan\"") !=
+          std::string::npos);
 }
 
 TEST_CASE("synthetic planner emits the six canonical root faces") {

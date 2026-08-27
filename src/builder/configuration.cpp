@@ -173,6 +173,103 @@ template <typename T>
     return Result<void>::success();
 }
 
+[[nodiscard]] Result<std::vector<std::string>> string_array(
+    const toml::table* table,
+    const std::string_view table_name,
+    const std::string_view key,
+    const std::filesystem::path& path) {
+    if (table == nullptr || !table->contains(key)) {
+        return Result<std::vector<std::string>>::success({});
+    }
+    const toml::array* values = (*table)[key].as_array();
+    if (values == nullptr) {
+        return Result<std::vector<std::string>>::failure(configuration_error(
+            path, fmt::format("configuration key '{}.{}' must be an array", table_name, key)));
+    }
+    std::vector<std::string> result;
+    result.reserve(values->size());
+    for (const toml::node& node : *values) {
+        auto value = node.value<std::string>();
+        if (!value || value->empty() || value->find('\0') != std::string::npos) {
+            return Result<std::vector<std::string>>::failure(configuration_error(
+                path, fmt::format("configuration key '{}.{}' must contain nonempty strings", table_name, key)));
+        }
+        result.push_back(std::move(*value));
+    }
+    return Result<std::vector<std::string>>::success(std::move(result));
+}
+
+[[nodiscard]] Result<std::vector<RasterFileConfiguration>> raster_files(
+    const toml::table* table,
+    const std::filesystem::path& path) {
+    if (table == nullptr || !table->contains("raster_files")) {
+        return Result<std::vector<RasterFileConfiguration>>::success({});
+    }
+    const toml::array* values = (*table)["raster_files"].as_array();
+    if (values == nullptr || values->empty()) {
+        return Result<std::vector<RasterFileConfiguration>>::failure(configuration_error(
+            path, "raster.raster_files must be a nonempty array of tables"));
+    }
+    std::vector<RasterFileConfiguration> result;
+    result.reserve(values->size());
+    for (std::size_t index = 0; index < values->size(); ++index) {
+        const toml::table* file = values->get(index)->as_table();
+        if (file == nullptr) {
+            return Result<std::vector<RasterFileConfiguration>>::failure(configuration_error(
+                path, "every raster.raster_files entry must be a table"));
+        }
+        auto keys = validate_keys(
+            *file,
+            {"member", "expected_width", "expected_height", "west_longitude_degrees",
+             "east_longitude_degrees", "south_latitude_degrees", "north_latitude_degrees"},
+            path,
+            "raster.raster_files");
+        if (!keys) {
+            return Result<std::vector<RasterFileConfiguration>>::failure(std::move(keys).error());
+        }
+        auto member = required_value<std::string>(file, "raster.raster_files", "member", path);
+        auto width = required_value<std::int64_t>(file, "raster.raster_files", "expected_width", path);
+        auto height = required_value<std::int64_t>(file, "raster.raster_files", "expected_height", path);
+        auto west = required_value<double>(file, "raster.raster_files", "west_longitude_degrees", path);
+        auto east = required_value<double>(file, "raster.raster_files", "east_longitude_degrees", path);
+        auto south = required_value<double>(file, "raster.raster_files", "south_latitude_degrees", path);
+        auto north = required_value<double>(file, "raster.raster_files", "north_latitude_degrees", path);
+        if (!(member && width && height && west && east && south && north)) {
+            const Error* error = !member ? &member.error() : !width ? &width.error() :
+                !height ? &height.error() : !west ? &west.error() : !east ? &east.error() :
+                !south ? &south.error() : &north.error();
+            return Result<std::vector<RasterFileConfiguration>>::failure(*error);
+        }
+        const bool valid = source_relative_path(member.value()) &&
+            width.value() > 0 && height.value() > 0 &&
+            width.value() <= std::numeric_limits<std::uint32_t>::max() &&
+            height.value() <= std::numeric_limits<std::uint32_t>::max() &&
+            std::isfinite(west.value()) && std::isfinite(east.value()) &&
+            std::isfinite(south.value()) && std::isfinite(north.value()) &&
+            west.value() < east.value() && south.value() < north.value() &&
+            west.value() >= -180.0 && east.value() <= 360.0 &&
+            south.value() >= -90.0 && north.value() <= 90.0;
+        if (!valid) {
+            return Result<std::vector<RasterFileConfiguration>>::failure(configuration_error(
+                path, fmt::format("raster.raster_files entry {} has invalid member, dimensions, or bounds", index)));
+        }
+        result.push_back(RasterFileConfiguration{
+            std::move(member).value(),
+            static_cast<std::uint32_t>(width.value()),
+            static_cast<std::uint32_t>(height.value()),
+            GeographicBounds{west.value(), east.value(), south.value(), north.value()},
+        });
+    }
+    std::ranges::sort(result, {}, &RasterFileConfiguration::member);
+    const auto duplicate = std::ranges::adjacent_find(
+        result, {}, &RasterFileConfiguration::member);
+    if (duplicate != result.end()) {
+        return Result<std::vector<RasterFileConfiguration>>::failure(configuration_error(
+            path, "raster.raster_files members must be unique"));
+    }
+    return Result<std::vector<RasterFileConfiguration>>::success(std::move(result));
+}
+
 [[nodiscard]] std::optional<std::string> environment_value(const std::string& name) {
 #ifdef _WIN32
     char* value = nullptr;
@@ -252,6 +349,13 @@ void append_domain(ByteVector& bytes, const std::string_view domain) {
     return value ? json_string(value->to_hex()) : "null";
 }
 
+[[nodiscard]] std::string canonical_double_json(const double value) {
+    if (std::isnan(value)) {
+        return json_string("nan");
+    }
+    return fmt::format("{}", value);
+}
+
 [[nodiscard]] std::string canonical_artifact_members_json(
     const std::vector<ArtifactMemberConfiguration>& members) {
     std::string result;
@@ -264,6 +368,40 @@ void append_domain(ByteVector& bytes, const std::string_view domain) {
             optional_u64_json(members[index].expected_bytes),
             json_string(members[index].name),
             optional_digest_json(members[index].expected_sha256));
+    }
+    return result;
+}
+
+[[nodiscard]] std::string canonical_string_array_json(
+    const std::vector<std::string>& values) {
+    std::string result;
+    for (std::size_t index = 0; index < values.size(); ++index) {
+        if (index != 0) {
+            result.push_back(',');
+        }
+        result += json_string(values[index]);
+    }
+    return result;
+}
+
+[[nodiscard]] std::string canonical_raster_files_json(
+    const std::vector<RasterFileConfiguration>& files) {
+    std::string result;
+    for (std::size_t index = 0; index < files.size(); ++index) {
+        if (index != 0) {
+            result.push_back(',');
+        }
+        const RasterFileConfiguration& file = files[index];
+        result += fmt::format(
+            "{{\"bounds_degrees\":{{\"east\":{},\"north\":{},\"south\":{},\"west\":{}}},"
+            "\"expected_height\":{},\"expected_width\":{},\"member\":{}}}",
+            file.bounds.east_longitude_degrees,
+            file.bounds.north_latitude_degrees,
+            file.bounds.south_latitude_degrees,
+            file.bounds.west_longitude_degrees,
+            file.expected_height,
+            file.expected_width,
+            json_string(file.member));
     }
     return result;
 }
@@ -287,7 +425,7 @@ void append_domain(ByteVector& bytes, const std::string_view domain) {
         ElevationRepresentation::elevation_meters ? "elevation_meters" : "radius_meters";
     const std::string no_data_policy = raster.no_data_policy == NoDataPolicy::error
         ? "error" : "nearest_valid";
-    return fmt::format(
+    std::string result = fmt::format(
         "{{\"artifact_bundle_bytes\":{},\"artifact_bundle_sha256\":{},"
         "\"artifact_members\":[{}],\"auxiliary_member\":{},"
         "\"bounds_degrees\":{{\"east\":{},\"north\":{},\"south\":{},\"west\":{}}},"
@@ -330,10 +468,22 @@ void append_domain(ByteVector& bytes, const std::string_view domain) {
         json_string(raster.role == RasterSourceRole::refinement ? "refinement" : "base"),
         raster.sample_offset,
         raster.sample_scale,
-        raster.source_no_data,
+        canonical_double_json(raster.source_no_data),
         raster.source_reference_radius_meters,
         json_string(raster.source_uri),
         json_string(raster.stable_key));
+    if (raster.raster_files.size() > 1U || !raster.quality_mapping.empty() ||
+        !raster.quality_members.empty() || !raster.unsupported_quality_values.empty()) {
+        result.pop_back();
+        result += fmt::format(
+            ",\"quality_mapping\":{},\"quality_members\":[{}],\"raster_files\":[{}],"
+            "\"unsupported_quality_values\":[{}]}}",
+            json_string(raster.quality_mapping),
+            canonical_string_array_json(raster.quality_members),
+            canonical_raster_files_json(raster.raster_files),
+            canonical_string_array_json(raster.unsupported_quality_values));
+    }
+    return result;
 }
 
 [[nodiscard]] Result<std::string> canonical_semantic_json(
@@ -376,7 +526,7 @@ void append_domain(ByteVector& bytes, const std::string_view domain) {
         }
         datasets += canonical_raster_json(*rasters[index].first);
     }
-    return Result<std::string>::success(fmt::format(
+    std::string result = fmt::format(
         "{{\"algorithm_version\":1,\"apron\":{{\"algorithm\":"
         "\"quantized_neighbor_or_virtual_v1\",\"corner_algorithm\":"
         "\"topology_diagonal_v1\"}},\"datasets\":[{}],"
@@ -400,7 +550,18 @@ void append_domain(ByteVector& bytes, const std::string_view domain) {
         "\"quantization_order\":\"after_seam\"}},"
         "\"tiles\":{{\"apron\":1,\"cells\":256,\"maximum_level\":{}}}}}",
         datasets,
-        configuration.maximum_level));
+        configuration.maximum_level);
+    if (configuration.required_region) {
+        result.pop_back();
+        const GeographicBounds& region = *configuration.required_region;
+        result += fmt::format(
+            ",\"required_region_degrees\":{{\"east\":{},\"north\":{},\"south\":{},\"west\":{}}}}}",
+            region.east_longitude_degrees,
+            region.north_latitude_degrees,
+            region.south_latitude_degrees,
+            region.west_longitude_degrees);
+    }
+    return Result<std::string>::success(std::move(result));
 }
 
 [[nodiscard]] std::string canonical_builder_json(
@@ -510,7 +671,7 @@ void append_domain(ByteVector& bytes, const std::string_view domain) {
 
     auto top_keys = validate_keys(
         root,
-        {"database", "datum", "projection", "tiles", "packaging", "synthetic", "raster", "local"},
+        {"database", "datum", "projection", "tiles", "packaging", "synthetic", "raster", "region", "local"},
         path,
         "root");
     if (!top_keys) {
@@ -524,8 +685,9 @@ void append_domain(ByteVector& bytes, const std::string_view domain) {
     auto packaging = optional_table(root, "packaging", path);
     auto synthetic = optional_table(root, "synthetic", path);
     auto raster = optional_table(root, "raster", path);
+    auto region = optional_table(root, "region", path);
     auto local = optional_table(root, "local", path);
-    for (const auto* result : {&database, &datum, &projection, &tiles, &packaging, &synthetic, &raster, &local}) {
+    for (const auto* result : {&database, &datum, &projection, &tiles, &packaging, &synthetic, &raster, &region, &local}) {
         if (!*result) {
             return Result<BuilderConfiguration>::failure(result->error());
         }
@@ -556,9 +718,16 @@ void append_domain(ByteVector& bytes, const std::string_view domain) {
              "effective_resolution_meters",
              "source_no_data", "sample_scale", "sample_offset", "elevation_representation",
              "source_reference_radius_meters", "no_data_policy", "metadata_override", "priority",
-             "role", "fusion_policy"},
+             "role", "fusion_policy", "raster_files", "quality_mapping", "quality_members",
+             "unsupported_quality_values", "source_root", "source_root_environment"},
             path,
             "raster"),
+        region.value() == nullptr ? Result<void>::success() : validate_keys(
+            *region.value(),
+            {"west_longitude_degrees", "east_longitude_degrees",
+             "south_latitude_degrees", "north_latitude_degrees"},
+            path,
+            "region"),
         local.value() == nullptr ? Result<void>::success() : validate_keys(
             *local.value(), {"threads", "cache_directory", "source_root", "source_root_environment"}, path, "local"),
     };
@@ -592,6 +761,28 @@ void append_domain(ByteVector& bytes, const std::string_view domain) {
         synthetic.value(), "synthetic", "amplitude_meters", 2'048, path);
     auto threads = optional_value<std::int64_t>(local.value(), "local", "threads", 1, path);
     auto cache = optional_value<std::string>(local.value(), "local", "cache_directory", ".ltbuild", path);
+
+    std::optional<GeographicBounds> required_region;
+    if (region.value() != nullptr) {
+        auto west = required_value<double>(region.value(), "region", "west_longitude_degrees", path);
+        auto east = required_value<double>(region.value(), "region", "east_longitude_degrees", path);
+        auto south = required_value<double>(region.value(), "region", "south_latitude_degrees", path);
+        auto north = required_value<double>(region.value(), "region", "north_latitude_degrees", path);
+        if (!(west && east && south && north)) {
+            return Result<BuilderConfiguration>::failure(
+                !west ? west.error() : !east ? east.error() : !south ? south.error() : north.error());
+        }
+        if (!std::isfinite(west.value()) || !std::isfinite(east.value()) ||
+            !std::isfinite(south.value()) || !std::isfinite(north.value()) ||
+            west.value() >= east.value() || south.value() >= north.value() ||
+            west.value() < -180.0 || east.value() > 360.0 ||
+            south.value() < -90.0 || north.value() > 90.0) {
+            return Result<BuilderConfiguration>::failure(configuration_error(
+                path, "region geographic bounds are invalid or wrap longitude"));
+        }
+        required_region = GeographicBounds{
+            west.value(), east.value(), south.value(), north.value()};
+    }
 
     if (!(name && output && major && minor && radius && origin && step && projection_type &&
           projection_version && cells && apron && maximum_level && target_pack_bytes && codec &&
@@ -652,6 +843,7 @@ void append_domain(ByteVector& bytes, const std::string_view domain) {
     configuration.target_pack_bytes = static_cast<std::uint64_t>(target_pack_bytes.value());
     configuration.worker_threads = static_cast<std::uint32_t>(threads.value());
     configuration.maximum_level = static_cast<std::uint8_t>(maximum_level.value());
+    configuration.required_region = required_region;
 
     if (!is_raster) {
         const std::array synthetic_checks{
@@ -683,18 +875,24 @@ void append_domain(ByteVector& bytes, const std::string_view domain) {
     auto product_version = optional_value<std::string>(raster.value(), "raster", "product_version", "", path);
     auto original_crs = required_value<std::string>(raster.value(), "raster", "original_crs", path);
     auto license = optional_value<std::string>(raster.value(), "raster", "license", "", path);
-    auto raster_member = required_value<std::string>(raster.value(), "raster", "raster_member", path);
+    auto raster_member = optional_value<std::string>(raster.value(), "raster", "raster_member", "", path);
     auto auxiliary_member = optional_value<std::string>(raster.value(), "raster", "auxiliary_member", "", path);
     auto label_member = optional_value<std::string>(raster.value(), "raster", "label_member", "", path);
     auto expected_data_type = required_value<std::string>(
         raster.value(), "raster", "expected_data_type", path);
     auto members = artifact_members(raster.value(), path);
-    auto expected_width = required_value<std::int64_t>(raster.value(), "raster", "expected_width", path);
-    auto expected_height = required_value<std::int64_t>(raster.value(), "raster", "expected_height", path);
-    auto west = required_value<double>(raster.value(), "raster", "west_longitude_degrees", path);
-    auto east = required_value<double>(raster.value(), "raster", "east_longitude_degrees", path);
-    auto south = required_value<double>(raster.value(), "raster", "south_latitude_degrees", path);
-    auto north = required_value<double>(raster.value(), "raster", "north_latitude_degrees", path);
+    auto expected_width = optional_value<std::int64_t>(raster.value(), "raster", "expected_width", 0, path);
+    auto expected_height = optional_value<std::int64_t>(raster.value(), "raster", "expected_height", 0, path);
+    auto west = optional_value<double>(raster.value(), "raster", "west_longitude_degrees", std::numeric_limits<double>::quiet_NaN(), path);
+    auto east = optional_value<double>(raster.value(), "raster", "east_longitude_degrees", std::numeric_limits<double>::quiet_NaN(), path);
+    auto south = optional_value<double>(raster.value(), "raster", "south_latitude_degrees", std::numeric_limits<double>::quiet_NaN(), path);
+    auto north = optional_value<double>(raster.value(), "raster", "north_latitude_degrees", std::numeric_limits<double>::quiet_NaN(), path);
+    auto files = raster_files(raster.value(), path);
+    auto quality_mapping = optional_value<std::string>(
+        raster.value(), "raster", "quality_mapping", "", path);
+    auto quality_members = string_array(raster.value(), "raster", "quality_members", path);
+    auto unsupported_quality_values = string_array(
+        raster.value(), "raster", "unsupported_quality_values", path);
     auto resolution = required_value<double>(raster.value(), "raster", "nominal_resolution_meters", path);
     auto effective_resolution = optional_value<double>(
         raster.value(), "raster", "effective_resolution_meters",
@@ -717,7 +915,8 @@ void append_domain(ByteVector& bytes, const std::string_view domain) {
           product_version && original_crs && license && raster_member && auxiliary_member &&
           label_member && expected_data_type && members && expected_width && expected_height && west && east && south &&
           north && resolution && effective_resolution && no_data && sample_scale && sample_offset && representation &&
-          source_radius && no_data_policy && metadata_override && priority && role && fusion_policy)) {
+          source_radius && no_data_policy && metadata_override && priority && role && fusion_policy &&
+          files && quality_mapping && quality_members && unsupported_quality_values)) {
         const Error* first_error = nullptr;
         const auto capture = [&first_error](const auto& value) {
             if (!value && first_error == nullptr) {
@@ -731,8 +930,25 @@ void append_domain(ByteVector& bytes, const std::string_view domain) {
         capture(east); capture(south); capture(north); capture(resolution); capture(effective_resolution); capture(no_data);
         capture(sample_scale); capture(sample_offset); capture(representation); capture(source_radius);
         capture(no_data_policy); capture(metadata_override); capture(priority); capture(role);
-        capture(fusion_policy);
+        capture(fusion_policy); capture(files); capture(quality_mapping); capture(quality_members);
+        capture(unsupported_quality_values);
         return Result<BuilderConfiguration>::failure(*first_error);
+    }
+
+    if (!files.value().empty()) {
+        raster_member = Result<std::string>::success(files.value().front().member);
+        expected_width = Result<std::int64_t>::success(files.value().front().expected_width);
+        expected_height = Result<std::int64_t>::success(files.value().front().expected_height);
+        west = Result<double>::success(files.value().front().bounds.west_longitude_degrees);
+        east = Result<double>::success(files.value().front().bounds.east_longitude_degrees);
+        south = Result<double>::success(files.value().front().bounds.south_latitude_degrees);
+        north = Result<double>::success(files.value().front().bounds.north_latitude_degrees);
+        for (const RasterFileConfiguration& file : files.value()) {
+            west = Result<double>::success(std::min(west.value(), file.bounds.west_longitude_degrees));
+            east = Result<double>::success(std::max(east.value(), file.bounds.east_longitude_degrees));
+            south = Result<double>::success(std::min(south.value(), file.bounds.south_latitude_degrees));
+            north = Result<double>::success(std::max(north.value(), file.bounds.north_latitude_degrees));
+        }
     }
 
     std::optional<std::uint64_t> bundle_bytes;
@@ -759,16 +975,27 @@ void append_domain(ByteVector& bytes, const std::string_view domain) {
         bundle_hash = digest.value();
     }
 
-    auto source_root = optional_value<std::string>(local.value(), "local", "source_root", "", path);
-    auto source_root_environment = optional_value<std::string>(
+    auto shared_source_root = optional_value<std::string>(local.value(), "local", "source_root", "", path);
+    auto shared_source_root_environment = optional_value<std::string>(
         local.value(), "local", "source_root_environment", "", path);
-    if (!(source_root && source_root_environment)) {
+    const bool has_per_raster_root = raster.value()->contains("source_root") ||
+        raster.value()->contains("source_root_environment");
+    auto source_root = optional_value<std::string>(
+        raster.value(), "raster", "source_root",
+        !has_per_raster_root && shared_source_root ? shared_source_root.value() : "", path);
+    auto source_root_environment = optional_value<std::string>(
+        raster.value(), "raster", "source_root_environment",
+        !has_per_raster_root && shared_source_root_environment
+            ? shared_source_root_environment.value() : "", path);
+    if (!(shared_source_root && shared_source_root_environment && source_root && source_root_environment)) {
         return Result<BuilderConfiguration>::failure(
-            source_root ? source_root_environment.error() : source_root.error());
+            !shared_source_root ? shared_source_root.error() :
+            !shared_source_root_environment ? shared_source_root_environment.error() :
+            !source_root ? source_root.error() : source_root_environment.error());
     }
     if (!source_root.value().empty() && !source_root_environment.value().empty()) {
         return Result<BuilderConfiguration>::failure(configuration_error(
-            path, "local.source_root and local.source_root_environment are mutually exclusive"));
+            path, "raster source_root and source_root_environment are mutually exclusive"));
     }
     std::filesystem::path resolved_root;
     if (!source_root_environment.value().empty()) {
@@ -787,7 +1014,7 @@ void append_domain(ByteVector& bytes, const std::string_view domain) {
         }
     } else {
         return Result<BuilderConfiguration>::failure(configuration_error(
-            path, "a raster source requires local.source_root or local.source_root_environment"));
+            path, "a raster source requires source_root or source_root_environment"));
     }
 
     const bool raster_member_present = std::ranges::any_of(
@@ -801,6 +1028,20 @@ void append_domain(ByteVector& bytes, const std::string_view domain) {
     const bool label_present = label_member.value().empty() || std::ranges::any_of(
         members.value(), [&](const ArtifactMemberConfiguration& member) {
             return member.name == label_member.value();
+        });
+    const bool files_present = std::ranges::all_of(
+        files.value(), [&](const RasterFileConfiguration& file) {
+            return std::ranges::any_of(
+                members.value(), [&](const ArtifactMemberConfiguration& member) {
+                    return member.name == file.member;
+                });
+        });
+    const bool quality_members_present = std::ranges::all_of(
+        quality_members.value(), [&](const std::string& quality_member) {
+            return std::ranges::any_of(
+                members.value(), [&](const ArtifactMemberConfiguration& member) {
+                    return member.name == quality_member;
+                });
         });
     const double selected_effective_resolution = std::isnan(effective_resolution.value())
         ? resolution.value() : effective_resolution.value();
@@ -817,6 +1058,12 @@ void append_domain(ByteVector& bytes, const std::string_view domain) {
                       path, "raster.label_member must be empty or a portable source-relative path"),
         require_equal(raster_member_present && auxiliary_present && label_present, path,
                       "raster and associated sidecar members must appear in raster.artifact_members"),
+        require_equal(files_present, path,
+                      "every raster.raster_files member must appear in raster.artifact_members"),
+        require_equal(quality_members_present, path,
+                      "every raster.quality_members entry must appear in raster.artifact_members"),
+        require_equal(quality_members.value().empty() || !quality_mapping.value().empty(), path,
+                      "raster.quality_mapping is required when quality_members are declared"),
         require_equal(!expected_data_type.value().empty() &&
                           expected_data_type.value().find('\0') == std::string::npos,
                       path, "raster.expected_data_type must be nonempty"),
@@ -839,7 +1086,8 @@ void append_domain(ByteVector& bytes, const std::string_view domain) {
                           selected_effective_resolution * 1'000.0 <=
                               static_cast<double>(std::numeric_limits<std::uint32_t>::max()),
                       path, "raster.effective_resolution_meters is outside the v1 millimeter range"),
-        require_equal(std::isfinite(no_data.value()) && std::isfinite(sample_scale.value()) &&
+        require_equal((std::isfinite(no_data.value()) || std::isnan(no_data.value())) &&
+                          std::isfinite(sample_scale.value()) &&
                           sample_scale.value() != 0.0 && std::isfinite(sample_offset.value()) &&
                           std::isfinite(source_radius.value()) && source_radius.value() > 0.0,
                       path, "raster sample, no-data, or datum values are invalid"),
@@ -877,6 +1125,18 @@ void append_domain(ByteVector& bytes, const std::string_view domain) {
     raster_configuration.label_member = std::move(label_member).value();
     raster_configuration.expected_data_type = std::move(expected_data_type).value();
     raster_configuration.artifact_members = std::move(members).value();
+    if (files.value().empty()) {
+        files.value().push_back(RasterFileConfiguration{
+            raster_configuration.raster_member,
+            static_cast<std::uint32_t>(expected_width.value()),
+            static_cast<std::uint32_t>(expected_height.value()),
+            GeographicBounds{west.value(), east.value(), south.value(), north.value()},
+        });
+    }
+    raster_configuration.raster_files = std::move(files).value();
+    raster_configuration.quality_mapping = std::move(quality_mapping).value();
+    raster_configuration.quality_members = std::move(quality_members).value();
+    raster_configuration.unsupported_quality_values = std::move(unsupported_quality_values).value();
     raster_configuration.expected_bundle_bytes = bundle_bytes;
     raster_configuration.expected_bundle_sha256 = bundle_hash;
     raster_configuration.source_root = resolved_root.lexically_normal();

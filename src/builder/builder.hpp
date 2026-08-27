@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 #include <filesystem>
 #include <optional>
@@ -18,6 +19,25 @@
 
 namespace lunar::terrain::builder {
 
+struct ScanSourceReport {
+    DatasetId dataset_id;
+    std::string stable_key;
+    std::string source_uri;
+    std::int32_t priority{};
+    RasterSourceRole role{RasterSourceRole::base};
+    FusionPolicy fusion_policy{FusionPolicy::replace};
+    double effective_resolution_meters{};
+    std::string quality_mapping;
+    std::vector<std::string> quality_members;
+    std::vector<std::string> unsupported_quality_values;
+    std::optional<RasterSourceDetails> raster_details;
+    std::size_t raster_file_count{};
+    std::vector<ArtifactMember> artifact_members;
+    std::optional<std::uint64_t> artifact_bundle_bytes;
+    std::optional<Sha256Digest> artifact_bundle_sha256;
+    std::optional<double> center_elevation_meters;
+};
+
 struct ScanReport {
     std::string database_name;
     DatasetId dataset_id;
@@ -30,11 +50,32 @@ struct ScanReport {
     std::optional<std::uint64_t> artifact_bundle_bytes;
     std::optional<Sha256Digest> artifact_bundle_sha256;
     std::optional<double> center_elevation_meters;
+    std::vector<ScanSourceReport> sources;
+    std::optional<GeographicBounds> required_region;
+};
+
+struct PlanSourceReport {
+    DatasetId dataset_id;
+    std::string stable_key;
+    std::int32_t priority{};
+    FusionPolicy fusion_policy{FusionPolicy::replace};
+    GeographicBounds coverage;
+    double effective_resolution_meters{};
+    std::uint8_t target_level{};
+};
+
+struct PlanLevelCount {
+    std::uint8_t level{};
+    std::uint64_t tile_count{};
 };
 
 struct PlanReport {
     std::vector<LunarTileKey> tiles;
+    std::vector<LunarTileKey> expected_hierarchy_tiles;
     std::uint64_t estimated_uncompressed_channel_bytes{};
+    std::vector<PlanSourceReport> sources;
+    std::vector<PlanLevelCount> level_counts;
+    std::optional<GeographicBounds> required_region;
 };
 
 struct PackBuildReport {

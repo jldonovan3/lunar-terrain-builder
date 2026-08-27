@@ -132,6 +132,7 @@ if(LUNAR_TERRAIN_BUILD_TESTING)
     include(CTest)
     enable_testing()
     find_package(Catch2 3 CONFIG REQUIRED)
+    find_package(Python3 3.9 COMPONENTS Interpreter REQUIRED)
     include(Catch)
 
     add_executable(
@@ -207,6 +208,23 @@ if(LUNAR_TERRAIN_BUILD_TESTING)
 
     add_test(NAME cli.version COMMAND lunar-terrain --version)
     set_tests_properties(cli.version PROPERTIES PASS_REGULAR_EXPRESSION "lunar-terrain 0.3.0")
+
+    add_test(
+        NAME provisioning.unit
+        COMMAND Python3::Interpreter -m unittest discover
+                -s "${CMAKE_CURRENT_SOURCE_DIR}/provisioning"
+                -p "test_*.py" -v
+    )
+    add_test(
+        NAME qualification.m8-builder-lock-consistency
+        COMMAND Python3::Interpreter
+                "${CMAKE_CURRENT_SOURCE_DIR}/provisioning/verify_builder_locks.py"
+                --lock "${CMAKE_CURRENT_SOURCE_DIR}/provisioning/provisioning.json"
+                "${CMAKE_CURRENT_SOURCE_DIR}/qualification/m8/configs/profile_a.toml"
+                "${CMAKE_CURRENT_SOURCE_DIR}/qualification/m8/configs/profile_b.toml"
+                "${CMAKE_CURRENT_SOURCE_DIR}/qualification/m8/configs/profile_c.toml"
+                "${CMAKE_CURRENT_SOURCE_DIR}/qualification/m8/configs/scale.toml"
+    )
 
     set(lunar_terrain_synthetic_config "${CMAKE_CURRENT_SOURCE_DIR}/tests/data/synthetic_p0.toml")
     set(lunar_terrain_synthetic_database "${CMAKE_CURRENT_SOURCE_DIR}/out/m2-synthetic/MoonSynthetic.ltdb")

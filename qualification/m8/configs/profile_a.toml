@@ -1,0 +1,115 @@
+[database]
+name = "M8ProfileA"
+format_major = 1
+format_minor = 0
+
+[datum]
+reference_radius_m = 1737400.0
+elevation_origin_m = -16384.0
+elevation_step_m = 0.5
+
+[projection]
+type = "qsc"
+version = 1
+
+[tiles]
+cells = 256
+apron = 1
+max_level = 12
+
+[packaging]
+target_pack_bytes = 1073741824
+codec = "zstd"
+codec_level = 3
+
+[region]
+west_longitude_degrees = 33.55
+east_longitude_degrees = 33.9
+south_latitude_degrees = 3.3
+north_latitude_degrees = 5.1
+
+[[raster]]
+stable_key = "nasa.sldem2015.512ppd.v1"
+source_uri = "https://pds-geosciences.wustl.edu/lro/lro-l-lola-3-rdr-v1/lrolol_1xxx/data/sldem2015/"
+product_name = "SLDEM2015 512 pixels per degree"
+producer = "LRO LOLA Team and Kaguya TC Team"
+mission = "Lunar Reconnaissance Orbiter / SELENE"
+instrument = "LOLA / Terrain Camera"
+product_version = "V2.0"
+original_crs = "PDS3 SIMPLE CYLINDRICAL, planetocentric latitude, east-positive longitude"
+license = "NASA Planetary Data System public data"
+raster_member = "tiles/jp2/sldem2015_512_00n_30n_000_045.jp2"
+expected_width = 23040
+expected_height = 15360
+west_longitude_degrees = 0.0
+east_longitude_degrees = 45.0
+south_latitude_degrees = 0.0
+north_latitude_degrees = 30.0
+auxiliary_member = ""
+label_member = ""
+expected_data_type = "Int16"
+artifact_bundle_bytes = 171872390
+artifact_bundle_sha256 = "17810a5b1551a56b865f59c20ae2c78c6aa05112112c557f466e21e19d5b9351"
+artifact_members = [
+  { name = "tiles/jp2/sldem2015_512_00n_30n_000_045.jp2", bytes = 171864155, sha256 = "8d6e9bb9687bd19dbc9de57c8044932540bb934e5ef557b473660f5056484a73" },
+  { name = "tiles/jp2/sldem2015_512_00n_30n_000_045_aux.xml", bytes = 3295, sha256 = "c9c013daa77cfbbd68efb157c51198fda3aed157f0d5ebddaf1a94f9151faa71" },
+  { name = "tiles/jp2/sldem2015_512_00n_30n_000_045_jp2.lbl", bytes = 4940, sha256 = "4d8f5edd72cdc486cbe491741a588dc545b7b72baa4cfb0e34cae7389d6305e0" }
+]
+nominal_resolution_meters = 59.2252938
+effective_resolution_meters = 59.2252938
+source_no_data = -32768.0
+sample_scale = 0.5
+sample_offset = 0.0
+elevation_representation = "elevation_meters"
+source_reference_radius_meters = 1737400.0
+no_data_policy = "error"
+metadata_override = true
+priority = 100
+role = "base"
+fusion_policy = "Replace"
+source_root_environment = "SLDEM2015_ROOT"
+
+[[raster]]
+stable_key = "nasa.lro.lroc.nac_dtm_maskelyne.v1_9"
+source_uri = "https://data.lroc.im-ldi.com/lroc/view_rdr/NAC_DTM_MASKELYNE"
+product_name = "LROC NAC DTM MASKELYNE"
+producer = "LROC Science Operations Center"
+mission = "Lunar Reconnaissance Orbiter"
+instrument = "LROC Narrow Angle Camera"
+product_version = "v1.9, 2020-10-11"
+original_crs = "Equirectangular Moon, planetocentric latitude, east-positive longitude, local radius 1737400 m"
+license = "NASA Planetary Data System public data"
+raster_member = "data/NAC_DTM_MASKELYNE.TIF"
+expected_width = 2370
+expected_height = 11542
+west_longitude_degrees = 33.5311476
+east_longitude_degrees = 33.9229931
+south_latitude_degrees = 3.2582976
+north_latitude_degrees = 5.1614514
+auxiliary_member = "data/NAC_DTM_MASKELYNE_CONF.IMG"
+label_member = "data/NAC_DTM_MASKELYNE.LBL"
+expected_data_type = "Float32"
+artifact_bundle_bytes = 136882682
+artifact_bundle_sha256 = "c7b56da9de0a50839e4881c32e3cee6c6ad67f1a6629e5875779c418aa3cea36"
+artifact_members = [
+  { name = "data/NAC_DTM_MASKELYNE.LBL", bytes = 3564, sha256 = "4902d85a7deaf07e227a3ceb3b1ae0ab48241b8626356fa89bda5f1a9b7779ed" },
+  { name = "data/NAC_DTM_MASKELYNE.TIF", bytes = 109511167, sha256 = "fe51b592de0cb46325d620ed6aa6d184b8c6f4fc2b93ddff6f486761df8087c8" },
+  { name = "data/NAC_DTM_MASKELYNE_CONF.IMG", bytes = 27359280, sha256 = "5e05340a178cf52a532c883facfafebe42dd497e6620704308a479e1cd2434b0" },
+  { name = "data/NAC_DTM_MASKELYNE_README.TXT", bytes = 8671, sha256 = "39f6a5336912eee973cd25e0b92273c8a7657b7a071af6c71f320bbb6c6a6f9e" }
+]
+nominal_resolution_meters = 5.0
+effective_resolution_meters = 5.0
+source_no_data = -3.40282265508890445e38
+sample_scale = 1.0
+sample_offset = 0.0
+elevation_representation = "elevation_meters"
+source_reference_radius_meters = 1737400.0
+no_data_policy = "error"
+metadata_override = false
+priority = 300
+role = "refinement"
+fusion_policy = "ResidualRefinement_v1"
+quality_mapping = "CONF DN 0 is no-data; DN 1-4 maps to QUAL lower-confidence and source-interpolated; DN 10-15 is accepted elevation support."
+quality_members = ["data/NAC_DTM_MASKELYNE_CONF.IMG"]
+unsupported_quality_values = ["Shadow, saturated, suspicious, interpolated/extrapolated, successful-correlation, and manually-edited confidence classes cannot retain their distinct source codes in v1 QUAL."]
+source_root_environment = "LROC_NAC_MASKELYNE_ROOT"

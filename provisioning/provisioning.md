@@ -2,7 +2,7 @@
 
 `provision.py` is the portable Windows and Linux entry point for acquiring and verifying external lunar DEM products. It requires Python 3.9 or newer and uses only the Python standard library. Product locks, bundle membership, provisioning profiles, and network settings live in the adjacent `provisioning.json`; source data and machine-local roots remain outside the repository.
 
-The checked-in configuration currently provides the established SLDEM2015 `Artifact` and `Fullset` profiles. Profile names are case-insensitive.
+The checked-in configuration provides the established SLDEM2015 `Artifact` and `Fullset` profiles plus the M8 `SLDEMBoundary`, `LOLAFoundation`, `Maskelyne`, and `SouthPolar80S` profiles. Profile names are case-insensitive. Product qualification evidence and exact Builder usage are recorded in [`../qualification/m8/README.md`](../qualification/m8/README.md).
 
 ## SLDEM2015 root
 
@@ -31,6 +31,28 @@ python3 ./provisioning/provision.py Artifact
 `Artifact` downloads and verifies the pinned JP2 tile, detached PDS label, and auxiliary XML sidecar. It checks every member's byte count, official PDS MD5, SHA-256, and the canonical artifact-bundle SHA-256 used by the Builder.
 
 `Fullset` downloads all 32 JP2 tiles and their 64 official sidecars. It verifies all 96 members against the official PDS MD5 manifest and locked total byte count, verifies the pinned artifact subset, and atomically writes `SLDEM2015_512ppd_SHA256SUMS.txt` under the external root.
+
+`SLDEMBoundary` selects the three original members for the `30–60°N, 0–45°E` tile used by M8 Profile B. It reuses the full-set member identities and does not replace or modify the established `Artifact` definition.
+
+## M8 product roots
+
+Each M8 product remains a separate provisioning invocation and external root:
+
+| Profile | Environment variable | Locked contents |
+|---|---|---|
+| `LOLAFoundation` | `LOLA_GDRDEM_ROOT` | Four lossless global `LDEM_256` JP2 rasters and their eight PDS sidecars |
+| `Maskelyne` | `LROC_NAC_MASKELYNE_ROOT` | NAC elevation GeoTIFF, confidence image, PDS label, and readme |
+| `SouthPolar80S` | `LOLA_SOUTH_POLAR_80S_ROOT` | Adjusted elevation, count, effective-resolution, and error GeoTIFFs |
+
+Examples use the same portable contract on Windows and Linux:
+
+```text
+python provisioning/provision.py LOLAFoundation --root <external-lola-root>
+python provisioning/provision.py Maskelyne --root <external-maskelyne-root>
+python provisioning/provision.py SouthPolar80S --root <external-polar-root>
+```
+
+Add `--verify-only` to any invocation to prohibit network access. The provisioning profile acquires one product/bundle only; Builder configurations combine the resulting environment-variable roots.
 
 ## Verification-only operation
 
@@ -66,7 +88,13 @@ The script validates the entire configuration before accessing an external root.
 python provisioning/provision.py <profile> --config provisioning/another-lock.json --root <external-root>
 ```
 
-Future M8 products should be added only after product preflight has locked their authoritative URLs, revision, required source members and companions, byte counts, published checksums where available, computed SHA-256 values, and canonical bundle identity. Do not add credentials, session state, generated derivatives, source data, checksum output, or machine-local paths to the checked-in configuration.
+Future products should be added only after product preflight has locked their authoritative URLs, revision, required source members and companions, byte counts, published checksums where available, computed SHA-256 values, and canonical bundle identity. Do not add credentials, session state, generated derivatives, source data, checksum output, or machine-local paths to the checked-in configuration.
+
+The focused Builder-lock consistency check is also standard-library-only:
+
+```text
+python provisioning/verify_builder_locks.py --lock provisioning/provisioning.json qualification/m8/configs/profile_a.toml qualification/m8/configs/profile_b.toml qualification/m8/configs/profile_c.toml qualification/m8/configs/scale.toml
+```
 
 ## Focused tests
 

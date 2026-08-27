@@ -1,0 +1,123 @@
+[database]
+name = "M8ProfileC"
+format_major = 1
+format_minor = 0
+
+[datum]
+reference_radius_m = 1737400.0
+elevation_origin_m = -16384.0
+elevation_step_m = 0.5
+
+[projection]
+type = "qsc"
+version = 1
+
+[tiles]
+cells = 256
+apron = 1
+max_level = 12
+
+[packaging]
+target_pack_bytes = 1073741824
+codec = "zstd"
+codec_level = 3
+
+[region]
+west_longitude_degrees = -180.0
+east_longitude_degrees = 180.0
+south_latitude_degrees = -90.0
+north_latitude_degrees = -89.0
+
+[[raster]]
+stable_key = "nasa.lro.lola.gdr.ldem256.v3_0.lro_es_52"
+source_uri = "https://pds-geosciences.wustl.edu/lro/lro-l-lola-3-rdr-v1/lrolol_1xxx/data/lola_gdr/cylindrical/jp2/"
+product_name = "LOLA GDR LDEM_256 global radius model"
+producer = "NASA GSFC LOLA Science Team"
+mission = "Lunar Reconnaissance Orbiter"
+instrument = "Lunar Orbiter Laser Altimeter"
+product_version = "V3.0; data through LRO_ES_52"
+original_crs = "PDS3 SIMPLE CYLINDRICAL, planetocentric latitude, east-positive longitude, DE421 Mean Earth/Polar Axis"
+license = "NASA Planetary Data System public data"
+raster_files = [
+  { member = "cylindrical/jp2/ldem_256_00n_90n_000_180.jp2", expected_width = 46080, expected_height = 23040, west_longitude_degrees = 0.0, east_longitude_degrees = 180.0, south_latitude_degrees = 0.0, north_latitude_degrees = 90.0 },
+  { member = "cylindrical/jp2/ldem_256_00n_90n_180_360.jp2", expected_width = 46080, expected_height = 23040, west_longitude_degrees = 180.0, east_longitude_degrees = 360.0, south_latitude_degrees = 0.0, north_latitude_degrees = 90.0 },
+  { member = "cylindrical/jp2/ldem_256_90s_00s_000_180.jp2", expected_width = 46080, expected_height = 23040, west_longitude_degrees = 0.0, east_longitude_degrees = 180.0, south_latitude_degrees = -90.0, north_latitude_degrees = 0.0 },
+  { member = "cylindrical/jp2/ldem_256_90s_00s_180_360.jp2", expected_width = 46080, expected_height = 23040, west_longitude_degrees = 180.0, east_longitude_degrees = 360.0, south_latitude_degrees = -90.0, north_latitude_degrees = 0.0 },
+]
+auxiliary_member = "cylindrical/jp2/ldem_256_00n_90n_000_180_aux.xml"
+label_member = "cylindrical/jp2/ldem_256_00n_90n_000_180_jp2.lbl"
+expected_data_type = "Int16"
+artifact_bundle_bytes = 1848004754
+artifact_bundle_sha256 = "8a657dde1f0047bc5cc32a179aee38ba3e36fa081723eae2618e8a181da1909f"
+artifact_members = [
+  { name = "cylindrical/jp2/ldem_256_00n_90n_000_180.jp2", bytes = 427545233, sha256 = "9c188a81bc33d3874ac1ef96768947e665e997df3f76431707f8adda7a981797" },
+  { name = "cylindrical/jp2/ldem_256_00n_90n_000_180_aux.xml", bytes = 2743, sha256 = "deb1636af9109c9c5ec535d86e3acd469679da519cae066d936372b68bb65ff6" },
+  { name = "cylindrical/jp2/ldem_256_00n_90n_000_180_jp2.lbl", bytes = 6598, sha256 = "64f095de4f0da2b5c56700f3a49857b7acc4055dacab72612d79669928302630" },
+  { name = "cylindrical/jp2/ldem_256_00n_90n_180_360.jp2", bytes = 418539506, sha256 = "a0e173b204fa4838028e9018beda868ad3d77211aae076e2ae966a2ba21380e2" },
+  { name = "cylindrical/jp2/ldem_256_00n_90n_180_360_aux.xml", bytes = 2732, sha256 = "54344508688535f11399b49f52b6d7f69e6537f97cb10e59493514b5e5abe907" },
+  { name = "cylindrical/jp2/ldem_256_00n_90n_180_360_jp2.lbl", bytes = 6592, sha256 = "1e50354d96b3bfbf839adc3eab58d99cac99819a72c1e3aad7e7c3baf52bc05a" },
+  { name = "cylindrical/jp2/ldem_256_90s_00s_000_180.jp2", bytes = 500914193, sha256 = "00053f297259d24553fd517042925805a601a5d72d9db4ca5d1e09bdbafba96f" },
+  { name = "cylindrical/jp2/ldem_256_90s_00s_000_180_aux.xml", bytes = 2794, sha256 = "441523838f6149e7120860099dfb8244a9ba2a970a9d2e04cba44fdf6891f587" },
+  { name = "cylindrical/jp2/ldem_256_90s_00s_000_180_jp2.lbl", bytes = 6595, sha256 = "10ac079bd8318bb4124d419dfbf7f53f60b191695432d0e35d958662c203dcc6" },
+  { name = "cylindrical/jp2/ldem_256_90s_00s_180_360.jp2", bytes = 500968345, sha256 = "8a3f54db4c3c7c7b6accd74504ec94a0f8f3a3b43276f6283e91afcd7caac90f" },
+  { name = "cylindrical/jp2/ldem_256_90s_00s_180_360_aux.xml", bytes = 2834, sha256 = "f689a0883dcc8be263fef3ec199e92b75338ecb3f26daa357e4de51280f6c519" },
+  { name = "cylindrical/jp2/ldem_256_90s_00s_180_360_jp2.lbl", bytes = 6589, sha256 = "a2a4d8917a64c3c1ab82e26b485b5e837d7d2640c91d8875fcf19c872d9a9c7c" }
+]
+nominal_resolution_meters = 118.4505876
+effective_resolution_meters = 118.4505876
+source_no_data = -32768.0
+sample_scale = 0.5
+sample_offset = 1737400.0
+elevation_representation = "radius_meters"
+source_reference_radius_meters = 1737400.0
+no_data_policy = "error"
+metadata_override = true
+priority = 0
+role = "base"
+fusion_policy = "Replace"
+source_root_environment = "LOLA_GDRDEM_ROOT"
+
+[[raster]]
+stable_key = "nasa.gsfc.lola.south_pole_80s.adjusted.2023_07_07"
+source_uri = "https://doi.org/10.60903/gsfcpgda-lola-spole"
+product_name = "NASA GSFC south-polar LOLA adjusted DEM 80S 20 mpp"
+producer = "NASA Goddard Space Flight Center Planetary Geology, Geophysics and Geochemistry Laboratory"
+mission = "Lunar Reconnaissance Orbiter"
+instrument = "Lunar Orbiter Laser Altimeter"
+product_version = "2023 adjusted south-polar bundle"
+original_crs = "South polar stereographic metres, planetocentric Moon (2015) sphere, DE421 Mean Earth frame"
+license = "NASA GSFC public data, DOI 10.60903/gsfcpgda-lola-spole"
+raster_member = "LDEM_80S_20MPP_ADJ.TIF"
+expected_width = 30400
+expected_height = 30400
+west_longitude_degrees = -180.0
+east_longitude_degrees = 180.0
+south_latitude_degrees = -90.0
+north_latitude_degrees = -75.8938043
+auxiliary_member = "LDEC_80S_20MPP_ADJ.TIF"
+label_member = ""
+expected_data_type = "Float32"
+artifact_bundle_bytes = 11915218975
+artifact_bundle_sha256 = "a0f79e5293db691a3e06022221137d261e1de322e542c3c45add92a3280d771e"
+artifact_members = [
+  { name = "LDEC_80S_20MPP_ADJ.TIF", bytes = 1289746965, sha256 = "a29315a23d54cb5056e3ca25329ce678882c49429db302d7f7e4560c76e09f86" },
+  { name = "LDEM_80S_20MPP_ADJ.TIF", bytes = 2696082051, sha256 = "09b7ca80f9e6a146f970225d18af72fc02787669b3ef51b888e347d2b6845649" },
+  { name = "LDEM_80S_20MPP_ADJ_EFFRES.TIF", bytes = 3974680758, sha256 = "1f38e0a0ae78191e7dba7aa21395acb7e8f55d769f556524d3105cd7eaf9f5c0" },
+  { name = "LDEM_80S_20MPP_ADJ_ERR.TIF", bytes = 3954709201, sha256 = "d64045b8aa58a24010f009ab5667ae02cc06cffa7796784dd5e2d48b3059d8cf" }
+]
+nominal_resolution_meters = 20.0
+effective_resolution_meters = 80.0
+source_no_data = nan
+sample_scale = 1.0
+sample_offset = 0.0
+elevation_representation = "elevation_meters"
+source_reference_radius_meters = 1737400.0
+no_data_policy = "error"
+metadata_override = false
+priority = 300
+role = "refinement"
+fusion_policy = "Replace"
+quality_mapping = "LDEC count 0 or non-finite elevation maps to QUAL filled-no-data/lower-confidence; local effective resolution above 80 m or elevation error above 5 m maps to QUAL lower-confidence."
+quality_members = ["LDEC_80S_20MPP_ADJ.TIF", "LDEM_80S_20MPP_ADJ_EFFRES.TIF", "LDEM_80S_20MPP_ADJ_ERR.TIF"]
+unsupported_quality_values = ["Exact shot count, continuous effective-resolution metres, and continuous elevation-error metres are recorded as source evidence but cannot be encoded losslessly in v1 QUAL."]
+source_root_environment = "LOLA_SOUTH_POLAR_80S_ROOT"

@@ -38,6 +38,20 @@ enum class FusionPolicy : std::uint8_t {
     residual_refinement_v1,
 };
 
+struct GeographicBounds {
+    double west_longitude_degrees{};
+    double east_longitude_degrees{};
+    double south_latitude_degrees{};
+    double north_latitude_degrees{};
+};
+
+struct RasterFileConfiguration {
+    std::string member;
+    std::uint32_t expected_width{};
+    std::uint32_t expected_height{};
+    GeographicBounds bounds;
+};
+
 struct ArtifactMemberConfiguration {
     std::string name;
     std::optional<std::uint64_t> expected_bytes;
@@ -59,6 +73,10 @@ struct RasterConfiguration {
     std::string label_member;
     std::string expected_data_type;
     std::vector<ArtifactMemberConfiguration> artifact_members;
+    std::vector<RasterFileConfiguration> raster_files;
+    std::string quality_mapping;
+    std::vector<std::string> quality_members;
+    std::vector<std::string> unsupported_quality_values;
     std::optional<std::uint64_t> expected_bundle_bytes;
     std::optional<Sha256Digest> expected_bundle_sha256;
     std::filesystem::path source_root;
@@ -95,6 +113,7 @@ struct BuilderConfiguration {
     std::uint32_t worker_threads{1};
     std::int32_t synthetic_amplitude_meters{2'048};
     std::uint8_t maximum_level{};
+    std::optional<GeographicBounds> required_region;
 };
 
 struct ConfigurationIdentity {

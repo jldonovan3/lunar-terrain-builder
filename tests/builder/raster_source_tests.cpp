@@ -333,12 +333,18 @@ TEST_CASE("generated GDAL raster catalogs plans and builds deterministic P1 outp
     CHECK(scan.value().artifact_members.size() == 1);
     CHECK(scan.value().artifact_bundle_bytes == std::filesystem::file_size(first_raster));
     CHECK(scan.value().center_elevation_meters == -0.75);
+    REQUIRE(scan.value().sources.size() == 1);
+    CHECK(scan.value().sources.front().raster_file_count == 1);
 
     auto plan = plan_configuration(first.value());
     REQUIRE(plan);
     REQUIRE(plan.value().tiles.size() == 1);
     CHECK(plan.value().tiles.front().level() == 7);
     CHECK(plan.value().tiles.front().face() == 0);
+    CHECK(plan.value().expected_hierarchy_tiles.size() > plan.value().tiles.size());
+    REQUIRE(plan.value().sources.size() == 1);
+    CHECK(plan.value().sources.front().target_level == 7);
+    CHECK_FALSE(plan.value().level_counts.empty());
 
     auto first_build = build_configuration(first.value());
     auto second_build = build_configuration(second.value(), BuildOptions{true, {}});
@@ -410,6 +416,12 @@ TEST_CASE("M5 overlapping rasters serialize deterministic provenance and quality
     REQUIRE(second_identity);
     CHECK(first_identity.value().builder_hash == second_identity.value().builder_hash);
     CHECK(first_identity.value().semantic_hash == second_identity.value().semantic_hash);
+
+    auto scan = scan_configuration(first.value());
+    REQUIRE(scan);
+    REQUIRE(scan.value().sources.size() == 2);
+    CHECK(scan.value().sources.front().priority < scan.value().sources.back().priority);
+    CHECK(scan.value().sources.back().fusion_policy == FusionPolicy::residual_refinement_v1);
 
     auto first_build = build_configuration(first.value());
     auto second_build = build_configuration(second.value());

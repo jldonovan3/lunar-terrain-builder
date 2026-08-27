@@ -61,6 +61,43 @@ namespace {
     return encoded;
 }
 
+[[nodiscard]] std::string_view fusion_policy_name(const FusionPolicy policy) noexcept {
+    switch (policy) {
+        case FusionPolicy::replace: return "Replace";
+        case FusionPolicy::bias_corrected_replace: return "BiasCorrectedReplace";
+        case FusionPolicy::residual_refinement_v1: return "ResidualRefinement_v1";
+    }
+    return "Replace";
+}
+
+[[nodiscard]] std::string optional_double_json(const std::optional<double> value) {
+    return value ? fmt::format("{}", *value) : "null";
+}
+
+[[nodiscard]] std::string double_json(const double value) {
+    return std::isnan(value) ? json_string("nan") : fmt::format("{}", value);
+}
+
+[[nodiscard]] std::string bounds_json(const GeographicBounds& bounds) {
+    return fmt::format(
+        "{{\"east\":{},\"north\":{},\"south\":{},\"west\":{}}}",
+        bounds.east_longitude_degrees,
+        bounds.north_latitude_degrees,
+        bounds.south_latitude_degrees,
+        bounds.west_longitude_degrees);
+}
+
+[[nodiscard]] std::string string_array_json(const std::vector<std::string>& values) {
+    std::string result;
+    for (std::size_t index = 0; index < values.size(); ++index) {
+        if (index != 0) {
+            result.push_back(',');
+        }
+        result += json_string(values[index]);
+    }
+    return result;
+}
+
 [[nodiscard]] Error validation_error(
     std::string message,
     const std::filesystem::path& path,
@@ -407,15 +444,66 @@ Result<ScanReport> scan_configuration(const BuilderConfiguration& configuration)
         }
         const double latitude = (footprint.south_latitude_degrees +
                                  footprint.north_latitude_degrees) * 0.5;
-        auto sample = source.Sample(LunarGeodeticCoordinate{
+        auto sample = source.TrySample(LunarGeodeticCoordinate{
             latitude * std::numbers::pi_v<double> / 180.0,
             longitude * std::numbers::pi_v<double> / 180.0,
-            0.0,
-        });
+            0.0});
         if (!sample) {
             return Result<ScanReport>::failure(std::move(sample).error());
         }
-        report.center_elevation_meters = sample.value().elevation_meters;
+        if (sample.value()) {
+            report.center_elevation_meters = sample.value()->elevation_meters;
+        }
+
+        std::vector<std::size_t> order(configuration.rasters.size());
+        for (std::size_t index = 0; index < order.size(); ++index) {
+            order[index] = index;
+        }
+        std::ranges::sort(order, {}, [&](const std::size_t index) {
+            return std::tuple{configuration.rasters[index].priority,
+                              identity.value().dataset_ids[index].value};
+        });
+        report.sources.reserve(order.size());
+        for (const std::size_t index : order) {
+            const RasterConfiguration& raster = configuration.rasters[index];
+            const IRasterSource& raster_source = *sources.value()[index];
+            ScanSourceReport source_report;
+            source_report.dataset_id = identity.value().dataset_ids[index];
+            source_report.stable_key = raster.stable_key;
+            source_report.source_uri = raster.source_uri;
+            source_report.priority = raster.priority;
+            source_report.role = raster.role;
+            source_report.fusion_policy = raster.fusion_policy;
+            source_report.effective_resolution_meters = raster.effective_resolution_meters;
+            source_report.quality_mapping = raster.quality_mapping;
+            source_report.quality_members = raster.quality_members;
+            source_report.unsupported_quality_values = raster.unsupported_quality_values;
+            source_report.raster_details = raster_source.details();
+            source_report.raster_file_count = raster.raster_files.size();
+            source_report.artifact_members = raster_source.metadata().artifact_members;
+            source_report.artifact_bundle_bytes = raster_source.metadata().artifact_bundle_bytes;
+            source_report.artifact_bundle_sha256 = raster_source.metadata().artifact_bundle_hash;
+            const GeographicFootprint& source_footprint = raster_source.details().footprint;
+            double source_longitude = (source_footprint.west_longitude_degrees +
+                                       source_footprint.east_longitude_degrees) * 0.5;
+            if (source_longitude > 180.0) {
+                source_longitude -= 360.0;
+            }
+            const double source_latitude = (source_footprint.south_latitude_degrees +
+                                            source_footprint.north_latitude_degrees) * 0.5;
+            auto center = raster_source.TrySample(LunarGeodeticCoordinate{
+                source_latitude * std::numbers::pi_v<double> / 180.0,
+                source_longitude * std::numbers::pi_v<double> / 180.0,
+                0.0});
+            if (!center) {
+                return Result<ScanReport>::failure(std::move(center).error());
+            }
+            if (center.value()) {
+                source_report.center_elevation_meters = center.value()->elevation_meters;
+            }
+            report.sources.push_back(std::move(source_report));
+        }
+        report.required_region = configuration.required_region;
     }
     return Result<ScanReport>::success(std::move(report));
 }
@@ -432,26 +520,41 @@ Result<PlanReport> plan_configuration(const BuilderConfiguration& configuration)
     if (!sources) {
         return Result<PlanReport>::failure(std::move(sources).error());
     }
-    std::size_t target = 0;
-    for (std::size_t index = 1; index < configuration.rasters.size(); ++index) {
-        if (std::tuple{configuration.rasters[target].priority,
-                       identity.value().dataset_ids[target].value} <
-            std::tuple{configuration.rasters[index].priority,
-                       identity.value().dataset_ids[index].value}) {
-            target = index;
+    std::vector<HierarchySource> hierarchy_sources;
+    hierarchy_sources.reserve(sources.value().size());
+    for (std::size_t index = 0; index < sources.value().size(); ++index) {
+        GeographicFootprint footprint = sources.value()[index]->details().footprint;
+        if (configuration.required_region) {
+            footprint.west_longitude_degrees = std::max(
+                footprint.west_longitude_degrees,
+                configuration.required_region->west_longitude_degrees);
+            footprint.east_longitude_degrees = std::min(
+                footprint.east_longitude_degrees,
+                configuration.required_region->east_longitude_degrees);
+            footprint.south_latitude_degrees = std::max(
+                footprint.south_latitude_degrees,
+                configuration.required_region->south_latitude_degrees);
+            footprint.north_latitude_degrees = std::min(
+                footprint.north_latitude_degrees,
+                configuration.required_region->north_latitude_degrees);
         }
+        if (footprint.west_longitude_degrees >= footprint.east_longitude_degrees ||
+            footprint.south_latitude_degrees >= footprint.north_latitude_degrees) {
+            continue;
+        }
+        hierarchy_sources.push_back(HierarchySource{
+            identity.value().dataset_ids[index],
+            footprint,
+            sources.value()[index]->metadata().effective_resolution_meters,
+            configuration.maximum_level});
     }
-    const IRasterSource& target_raster = *sources.value()[target];
-    auto target_level = choose_source_level(
-        target_raster.details().footprint,
-        target_raster.metadata().effective_resolution_meters,
-        configuration.maximum_level);
-    if (!target_level) {
-        return Result<PlanReport>::failure(std::move(target_level).error());
+    if (hierarchy_sources.empty()) {
+        return Result<PlanReport>::failure(Error{
+            ErrorCode::invalid_argument, "required region does not intersect any configured source"});
     }
-    auto key = choose_raster_prototype_tile(target_raster, target_level.value());
-    if (!key) {
-        return Result<PlanReport>::failure(std::move(key).error());
+    auto hierarchy = plan_sparse_hierarchy(hierarchy_sources);
+    if (!hierarchy) {
+        return Result<PlanReport>::failure(std::move(hierarchy).error());
     }
     constexpr std::uint64_t elevation_bytes =
         std::uint64_t{format_v1::serialized_elevation_samples} *
@@ -461,10 +564,67 @@ Result<PlanReport> plan_configuration(const BuilderConfiguration& configuration)
         configuration.rasters.size() * format_v1::bytes::provenance_palette_entry +
         (configuration.rasters.size() > 1 ? 64U * 64U : 0U);
     const std::uint64_t quality_bytes = configuration.rasters.size() > 1 ? 64U * 64U : 0U;
-    return Result<PlanReport>::success(PlanReport{
-        {key.value()},
-        elevation_bytes + provenance_bytes + quality_bytes,
+    const std::uint64_t bytes_per_tile = elevation_bytes + provenance_bytes + quality_bytes;
+    if (hierarchy.value().tiles.size() >
+        std::numeric_limits<std::uint64_t>::max() / bytes_per_tile) {
+        return Result<PlanReport>::failure(Error{
+            ErrorCode::arithmetic_overflow, "planned hierarchy byte estimate overflows uint64"});
+    }
+    SparseHierarchyPlan hierarchy_plan = std::move(hierarchy).value();
+    PlanReport report;
+    report.expected_hierarchy_tiles = std::move(hierarchy_plan.tiles);
+    std::size_t target = 0;
+    for (std::size_t index = 1; index < configuration.rasters.size(); ++index) {
+        if (std::tuple{configuration.rasters[target].priority,
+                       identity.value().dataset_ids[target].value} <
+            std::tuple{configuration.rasters[index].priority,
+                       identity.value().dataset_ids[index].value}) {
+            target = index;
+        }
+    }
+    const auto target_level = std::ranges::find(
+        hierarchy_plan.source_levels,
+        identity.value().dataset_ids[target],
+        &HierarchySourceLevel::dataset_id);
+    if (target_level != hierarchy_plan.source_levels.end()) {
+        auto prototype = choose_raster_prototype_tile(
+            *sources.value()[target], target_level->level);
+        if (!prototype) {
+            return Result<PlanReport>::failure(std::move(prototype).error());
+        }
+        report.tiles.push_back(prototype.value());
+    }
+    report.estimated_uncompressed_channel_bytes =
+        static_cast<std::uint64_t>(report.expected_hierarchy_tiles.size()) * bytes_per_tile;
+    report.required_region = configuration.required_region;
+    for (const HierarchySourceLevel& level : hierarchy_plan.source_levels) {
+        const auto found = std::ranges::find(identity.value().dataset_ids, level.dataset_id);
+        if (found == identity.value().dataset_ids.end()) {
+            continue;
+        }
+        const std::size_t index = static_cast<std::size_t>(found - identity.value().dataset_ids.begin());
+        const HierarchySource& planned = *std::ranges::find(
+            hierarchy_sources, level.dataset_id, &HierarchySource::dataset_id);
+        report.sources.push_back(PlanSourceReport{
+            level.dataset_id,
+            configuration.rasters[index].stable_key,
+            configuration.rasters[index].priority,
+            configuration.rasters[index].fusion_policy,
+            planned.footprint,
+            planned.effective_resolution_meters,
+            level.level});
+    }
+    std::ranges::sort(report.sources, {}, [](const PlanSourceReport& source) {
+        return std::tuple{source.priority, source.dataset_id.value};
     });
+    std::map<std::uint8_t, std::uint64_t> counts;
+    for (const LunarTileKey key : report.expected_hierarchy_tiles) {
+        ++counts[key.level()];
+    }
+    for (const auto [level, count] : counts) {
+        report.level_counts.push_back(PlanLevelCount{level, count});
+    }
+    return Result<PlanReport>::success(std::move(report));
 }
 
 Result<BuildReport> build_configuration(
@@ -489,6 +649,8 @@ Result<PlanReport> plan_synthetic(const BuilderConfiguration& configuration) {
         }
         report.tiles.push_back(key.value());
     }
+    report.expected_hierarchy_tiles = report.tiles;
+    report.level_counts.push_back(PlanLevelCount{0, report.tiles.size()});
     constexpr std::uint64_t elevation_bytes =
         std::uint64_t{format_v1::serialized_elevation_samples} *
         format_v1::serialized_elevation_samples * 2U;
@@ -645,13 +807,13 @@ std::string format_report(const ScanReport& report, const bool json) {
                 *report.artifact_bundle_bytes,
                 json_string(report.artifact_bundle_sha256->to_hex()),
                 members,
-                *report.center_elevation_meters,
+                optional_double_json(report.center_elevation_meters),
                 json_string(details.data_type_name),
                 json_string(details.driver_name),
                 json_string(representation),
                 details.footprint.east_longitude_degrees,
                 details.height,
-                details.no_data_value,
+                double_json(details.no_data_value),
                 details.footprint.north_latitude_degrees,
                 details.sample_offset,
                 details.sample_scale,
@@ -659,15 +821,49 @@ std::string format_report(const ScanReport& report, const bool json) {
                 details.footprint.west_longitude_degrees,
                 details.width);
         }
+        std::string sources;
+        for (std::size_t index = 0; index < report.sources.size(); ++index) {
+            if (index != 0) {
+                sources.push_back(',');
+            }
+            const ScanSourceReport& source = report.sources[index];
+            sources += fmt::format(
+                "{{\"artifact_bundle_bytes\":{},\"artifact_bundle_sha256\":{},"
+                "\"center_elevation_meters\":{},\"coverage_degrees\":{},"
+                "\"dataset_id\":{},\"effective_resolution_meters\":{},"
+                "\"fusion_policy\":{},\"priority\":{},\"quality_mapping\":{},"
+                "\"quality_members\":[{}],\"raster_file_count\":{},\"role\":{},"
+                "\"source_uri\":{},\"stable_key\":{},\"unsupported_quality_values\":[{}]}}",
+                *source.artifact_bundle_bytes,
+                json_string(source.artifact_bundle_sha256->to_hex()),
+                optional_double_json(source.center_elevation_meters),
+                bounds_json(source.raster_details->footprint),
+                source.dataset_id.value,
+                source.effective_resolution_meters,
+                json_string(fusion_policy_name(source.fusion_policy)),
+                source.priority,
+                json_string(source.quality_mapping),
+                string_array_json(source.quality_members),
+                source.raster_file_count,
+                json_string(source.role == RasterSourceRole::base ? "base" : "refinement"),
+                json_string(source.source_uri),
+                json_string(source.stable_key),
+                string_array_json(source.unsupported_quality_values));
+        }
+        const std::string region = report.required_region
+            ? bounds_json(*report.required_region) : "null";
         return fmt::format(
             "{{\"builder_configuration_sha256\":{},\"database_name\":{},\"dataset_id\":{},"
-            "\"raster\":{},\"semantic_configuration_sha256\":{},\"source_uri\":{},"
+            "\"raster\":{},\"required_region_degrees\":{},"
+            "\"semantic_configuration_sha256\":{},\"source_registry\":[{}],\"source_uri\":{},"
             "\"stable_key\":{}}}\n",
             json_string(report.builder_configuration_hash.to_hex()),
             json_string(report.database_name),
             report.dataset_id.value,
             raster,
+            region,
             json_string(report.semantic_configuration_hash.to_hex()),
+            sources,
             json_string(report.source_uri),
             json_string(report.stable_key));
     }
@@ -699,7 +895,42 @@ std::string format_report(const ScanReport& report, const bool json) {
             details.sample_offset,
             *report.artifact_bundle_bytes,
             report.artifact_bundle_sha256->to_hex(),
-            *report.center_elevation_meters);
+            report.center_elevation_meters.value_or(std::numeric_limits<double>::quiet_NaN()));
+    }
+    if (report.required_region) {
+        text += fmt::format(
+            "required region: {}..{} degrees east, {}..{} degrees north\n",
+            report.required_region->west_longitude_degrees,
+            report.required_region->east_longitude_degrees,
+            report.required_region->south_latitude_degrees,
+            report.required_region->north_latitude_degrees);
+    }
+    if (!report.sources.empty()) {
+        text += "source registry (fusion order):\n";
+        for (const ScanSourceReport& source : report.sources) {
+            const GeographicBounds& coverage = source.raster_details->footprint;
+            text += fmt::format(
+                "  {} ({}) priority={} role={} policy={} files={} effective={} m "
+                "coverage={}..{} E, {}..{} N\n"
+                "    artifact bundle: {} bytes, {}\n"
+                "    quality mapping: {}; unsupported: {}\n",
+                source.stable_key,
+                source.dataset_id.value,
+                source.priority,
+                source.role == RasterSourceRole::base ? "base" : "refinement",
+                fusion_policy_name(source.fusion_policy),
+                source.raster_file_count,
+                source.effective_resolution_meters,
+                coverage.west_longitude_degrees,
+                coverage.east_longitude_degrees,
+                coverage.south_latitude_degrees,
+                coverage.north_latitude_degrees,
+                *source.artifact_bundle_bytes,
+                source.artifact_bundle_sha256->to_hex(),
+                source.quality_mapping.empty() ? "none" : source.quality_mapping,
+                source.unsupported_quality_values.empty()
+                    ? "none" : fmt::format("{} value(s)", source.unsupported_quality_values.size()));
+        }
     }
     return text;
 }
@@ -707,24 +938,96 @@ std::string format_report(const ScanReport& report, const bool json) {
 std::string format_report(const PlanReport& report, const bool json) {
     if (json) {
         std::string tiles;
-        for (std::size_t index = 0; index < report.tiles.size(); ++index) {
+        const std::size_t listed_tiles = std::min<std::size_t>(
+            report.expected_hierarchy_tiles.size(), 256U);
+        for (std::size_t index = 0; index < listed_tiles; ++index) {
             if (index > 0) {
                 tiles.push_back(',');
             }
-            tiles += json_string(report.tiles[index].to_string());
+            tiles += json_string(report.expected_hierarchy_tiles[index].to_string());
+        }
+        std::string sources;
+        for (std::size_t index = 0; index < report.sources.size(); ++index) {
+            if (index != 0) {
+                sources.push_back(',');
+            }
+            const PlanSourceReport& source = report.sources[index];
+            sources += fmt::format(
+                "{{\"coverage_degrees\":{},\"dataset_id\":{},"
+                "\"effective_resolution_meters\":{},\"fusion_policy\":{},"
+                "\"priority\":{},\"stable_key\":{},\"target_level\":{}}}",
+                bounds_json(source.coverage),
+                source.dataset_id.value,
+                source.effective_resolution_meters,
+                json_string(fusion_policy_name(source.fusion_policy)),
+                source.priority,
+                json_string(source.stable_key),
+                source.target_level);
+        }
+        std::string levels;
+        for (std::size_t index = 0; index < report.level_counts.size(); ++index) {
+            if (index != 0) {
+                levels.push_back(',');
+            }
+            levels += fmt::format(
+                "{{\"level\":{},\"tile_count\":{}}}",
+                report.level_counts[index].level,
+                report.level_counts[index].tile_count);
         }
         return fmt::format(
-            "{{\"estimated_uncompressed_channel_bytes\":{},\"tile_count\":{},\"tiles\":[{}]}}\n",
+            "{{\"estimated_uncompressed_channel_bytes\":{},\"level_counts\":[{}],"
+            "\"prototype_tile_count\":{},\"required_region_degrees\":{},\"sources\":[{}],"
+            "\"tile_count\":{},\"tiles\":[{}],\"tiles_omitted\":{}}}\n",
             report.estimated_uncompressed_channel_bytes,
+            levels,
             report.tiles.size(),
-            tiles);
+            report.required_region ? bounds_json(*report.required_region) : "null",
+            sources,
+            report.expected_hierarchy_tiles.size(),
+            tiles,
+            report.expected_hierarchy_tiles.size() - listed_tiles);
     }
     std::string text = fmt::format(
         "planned tiles: {}\nestimated uncompressed channel bytes: {}\n",
-        report.tiles.size(),
+        report.expected_hierarchy_tiles.size(),
         report.estimated_uncompressed_channel_bytes);
-    for (const LunarTileKey key : report.tiles) {
+    if (report.required_region) {
+        text += fmt::format(
+            "required region: {}..{} degrees east, {}..{} degrees north\n",
+            report.required_region->west_longitude_degrees,
+            report.required_region->east_longitude_degrees,
+            report.required_region->south_latitude_degrees,
+            report.required_region->north_latitude_degrees);
+    }
+    text += "source levels (fusion order):\n";
+    for (const PlanSourceReport& source : report.sources) {
+        text += fmt::format(
+            "  {} ({}) priority={} policy={} effective={} m -> L{}; coverage={}..{} E, {}..{} N\n",
+            source.stable_key,
+            source.dataset_id.value,
+            source.priority,
+            fusion_policy_name(source.fusion_policy),
+            source.effective_resolution_meters,
+            source.target_level,
+            source.coverage.west_longitude_degrees,
+            source.coverage.east_longitude_degrees,
+            source.coverage.south_latitude_degrees,
+            source.coverage.north_latitude_degrees);
+    }
+    text += "hierarchy counts:\n";
+    for (const PlanLevelCount count : report.level_counts) {
+        text += fmt::format("  L{}: {}\n", count.level, count.tile_count);
+    }
+    const std::size_t listed_tiles = std::min<std::size_t>(
+        report.expected_hierarchy_tiles.size(), 256U);
+    for (std::size_t index = 0; index < listed_tiles; ++index) {
+        const LunarTileKey key = report.expected_hierarchy_tiles[index];
         text += fmt::format("  {}\n", key.to_string());
+    }
+    if (listed_tiles != report.expected_hierarchy_tiles.size()) {
+        text += fmt::format(
+            "  ... {} tile keys omitted\n",
+            report.expected_hierarchy_tiles.size() - listed_tiles);
     }
     return text;
 }

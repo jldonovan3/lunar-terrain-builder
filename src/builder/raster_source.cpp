@@ -257,6 +257,44 @@ void append_domain(Bytes& bytes, const std::string_view value) {
     return result;
 }
 
+[[nodiscard]] std::string metadata_double_json(const double value) {
+    return std::isnan(value) ? json_string("nan") : fmt::format("{}", value);
+}
+
+[[nodiscard]] std::string metadata_strings_json(const std::vector<std::string>& values) {
+    std::string result;
+    for (std::size_t index = 0; index < values.size(); ++index) {
+        if (index != 0) {
+            result.push_back(',');
+        }
+        result += json_string(values[index]);
+    }
+    return result;
+}
+
+[[nodiscard]] std::string metadata_raster_files_json(
+    const std::vector<RasterFileConfiguration>& files) {
+    std::string result;
+    for (std::size_t index = 0; index < files.size(); ++index) {
+        if (index != 0) {
+            result.push_back(',');
+        }
+        const RasterFileConfiguration& file = files[index];
+        result += fmt::format(
+            "{{\"east_longitude_degrees\":{},\"expected_height\":{},"
+            "\"expected_width\":{},\"member\":{},\"north_latitude_degrees\":{},"
+            "\"south_latitude_degrees\":{},\"west_longitude_degrees\":{}}}",
+            file.bounds.east_longitude_degrees,
+            file.expected_height,
+            file.expected_width,
+            json_string(file.member),
+            file.bounds.north_latitude_degrees,
+            file.bounds.south_latitude_degrees,
+            file.bounds.west_longitude_degrees);
+    }
+    return result;
+}
+
 [[nodiscard]] Result<DatasetArtifact> make_dataset_artifact(
     const RasterConfiguration& configuration,
     const DatasetId dataset_id,
@@ -334,10 +372,22 @@ void append_domain(Bytes& bytes, const std::string_view value) {
         json_string(policy),
         configuration.sample_offset,
         configuration.sample_scale,
-        configuration.source_no_data,
+        metadata_double_json(configuration.source_no_data),
         configuration.priority,
         json_string(configuration.raster_member),
         json_string(configuration.stable_key));
+    if (configuration.raster_files.size() > 1U || !configuration.quality_mapping.empty() ||
+        !configuration.quality_members.empty() ||
+        !configuration.unsupported_quality_values.empty()) {
+        dataset.metadata_json.pop_back();
+        dataset.metadata_json += fmt::format(
+            ",\"quality_mapping\":{},\"quality_members\":[{}],\"raster_files\":[{}],"
+            "\"unsupported_quality_values\":[{}]}}",
+            json_string(configuration.quality_mapping),
+            metadata_strings_json(configuration.quality_members),
+            metadata_raster_files_json(configuration.raster_files),
+            metadata_strings_json(configuration.unsupported_quality_values));
+    }
 
     Bytes registry_input;
     append_domain(registry_input, "LTDB_DATASET_REGISTRY_V1");
@@ -396,6 +446,10 @@ private:
 [[nodiscard]] bool almost_equal(const double left, const double right) noexcept {
     const double scale = std::max({1.0, std::abs(left), std::abs(right)});
     return std::abs(left - right) <= scale * 1.0e-10;
+}
+
+[[nodiscard]] bool almost_equal_degrees(const double left, const double right) noexcept {
+    return std::abs(left - right) <= 1.0e-7;
 }
 
 class GdalRasterSource final : public IRasterSource {
@@ -736,13 +790,35 @@ private:
             extracted.south_latitude_degrees = std::min(extracted.south_latitude_degrees, y);
             extracted.north_latitude_degrees = std::max(extracted.north_latitude_degrees, y);
         }
-        if (!almost_equal(extracted.west_longitude_degrees, details_.footprint.west_longitude_degrees) ||
-            !almost_equal(extracted.east_longitude_degrees, details_.footprint.east_longitude_degrees) ||
-            !almost_equal(extracted.south_latitude_degrees, details_.footprint.south_latitude_degrees) ||
-            !almost_equal(extracted.north_latitude_degrees, details_.footprint.north_latitude_degrees)) {
+        double center_x = geotransform_[0] +
+            static_cast<double>(details_.width) * 0.5 * geotransform_[1] +
+            static_cast<double>(details_.height) * 0.5 * geotransform_[2];
+        double center_y = geotransform_[3] +
+            static_cast<double>(details_.width) * 0.5 * geotransform_[4] +
+            static_cast<double>(details_.height) * 0.5 * geotransform_[5];
+        if (from_dataset_->Transform(1, &center_x, &center_y) &&
+            almost_equal_degrees(center_y, -90.0)) {
+            extracted.west_longitude_degrees = -180.0;
+            extracted.east_longitude_degrees = 180.0;
+            extracted.south_latitude_degrees = -90.0;
+        }
+        if (!almost_equal_degrees(extracted.west_longitude_degrees, details_.footprint.west_longitude_degrees) ||
+            !almost_equal_degrees(extracted.east_longitude_degrees, details_.footprint.east_longitude_degrees) ||
+            !almost_equal_degrees(extracted.south_latitude_degrees, details_.footprint.south_latitude_degrees) ||
+            !almost_equal_degrees(extracted.north_latitude_degrees, details_.footprint.north_latitude_degrees)) {
             return Result<void>::failure(raster_error(
                 ErrorCode::invalid_argument,
-                "GDAL raster footprint disagrees with the declared geographic bounds", raster_path_));
+                fmt::format(
+                    "GDAL raster footprint [{}, {}, {}, {}] disagrees with declared bounds [{}, {}, {}, {}]",
+                    extracted.west_longitude_degrees,
+                    extracted.east_longitude_degrees,
+                    extracted.south_latitude_degrees,
+                    extracted.north_latitude_degrees,
+                    details_.footprint.west_longitude_degrees,
+                    details_.footprint.east_longitude_degrees,
+                    details_.footprint.south_latitude_degrees,
+                    details_.footprint.north_latitude_degrees),
+                raster_path_));
         }
         details_.footprint = extracted;
         return Result<void>::success();
@@ -769,12 +845,15 @@ private:
         const double scale = band_->GetScale(&scale_success);
         int offset_success = 0;
         const double offset = band_->GetOffset(&offset_success);
-        if (no_data_success == 0 || !almost_equal(no_data, configuration_.source_no_data)) {
+        if (no_data_success == 0 ||
+            !(almost_equal(no_data, configuration_.source_no_data) ||
+              (std::isnan(no_data) && std::isnan(configuration_.source_no_data)))) {
             return Result<void>::failure(raster_error(
                 ErrorCode::invalid_argument,
                 "GDAL no-data metadata is missing or disagrees with configuration", raster_path_));
         }
-        if (scale_success == 0 || !almost_equal(scale, configuration_.sample_scale)) {
+        if ((scale_success == 0 && configuration_.sample_scale != 1.0) ||
+            (scale_success != 0 && !almost_equal(scale, configuration_.sample_scale))) {
             return Result<void>::failure(raster_error(
                 ErrorCode::invalid_argument,
                 "GDAL sample scale is missing or disagrees with configuration", raster_path_));
@@ -822,6 +901,117 @@ private:
     CoordinateTransformationPtr to_dataset_;
     CoordinateTransformationPtr from_dataset_;
 };
+
+class MosaicRasterSource final : public IRasterSource {
+public:
+    static Result<std::unique_ptr<IRasterSource>> Open(
+        const RasterConfiguration& configuration,
+        DatasetArtifact dataset) {
+        if (configuration.raster_files.empty()) {
+            return failure<std::unique_ptr<IRasterSource>>(
+                ErrorCode::invalid_argument, "logical raster source contains no raster files");
+        }
+        std::vector<std::unique_ptr<IRasterSource>> components;
+        components.reserve(configuration.raster_files.size());
+        for (const RasterFileConfiguration& file : configuration.raster_files) {
+            RasterConfiguration physical = configuration;
+            physical.raster_member = file.member;
+            physical.expected_width = file.expected_width;
+            physical.expected_height = file.expected_height;
+            physical.west_longitude_degrees = file.bounds.west_longitude_degrees;
+            physical.east_longitude_degrees = file.bounds.east_longitude_degrees;
+            physical.south_latitude_degrees = file.bounds.south_latitude_degrees;
+            physical.north_latitude_degrees = file.bounds.north_latitude_degrees;
+            auto opened = GdalRasterSource::Open(physical, dataset);
+            if (!opened) {
+                return Result<std::unique_ptr<IRasterSource>>::failure(std::move(opened).error());
+            }
+            components.push_back(std::move(opened).value());
+        }
+        return Result<std::unique_ptr<IRasterSource>>::success(
+            std::unique_ptr<IRasterSource>{new MosaicRasterSource(
+                std::move(dataset), std::move(components))});
+    }
+
+    [[nodiscard]] const DatasetArtifact& metadata() const noexcept override { return dataset_; }
+    [[nodiscard]] const RasterSourceDetails& details() const noexcept override { return details_; }
+
+    [[nodiscard]] bool Covers(const LunarGeodeticCoordinate coordinate) const noexcept override {
+        return std::ranges::any_of(components_, [&](const auto& source) {
+            return source->Covers(coordinate);
+        });
+    }
+
+    [[nodiscard]] Result<RawTerrainSample> Sample(
+        const LunarGeodeticCoordinate coordinate) const override {
+        for (const auto& source : components_) {
+            auto sample = source->TrySample(coordinate);
+            if (!sample) {
+                return Result<RawTerrainSample>::failure(std::move(sample).error());
+            }
+            if (sample.value()) {
+                return Result<RawTerrainSample>::success(*sample.value());
+            }
+        }
+        return failure<RawTerrainSample>(
+            ErrorCode::not_found, "coordinate is outside the logical raster source coverage or is no-data");
+    }
+
+    [[nodiscard]] Result<Sha256Digest> WindowDependency(
+        const LunarTileKey key) const override {
+        Bytes input;
+        append_domain(input, "LTDB_GDAL_MOSAIC_WINDOW_V1");
+        append_u64(input, key.encoded());
+        append_u64(input, components_.size());
+        for (const auto& source : components_) {
+            auto dependency = source->WindowDependency(key);
+            if (!dependency) {
+                return Result<Sha256Digest>::failure(std::move(dependency).error());
+            }
+            input.insert(input.end(), dependency.value().bytes.begin(), dependency.value().bytes.end());
+        }
+        return sha256(input);
+    }
+
+private:
+    MosaicRasterSource(
+        DatasetArtifact dataset,
+        std::vector<std::unique_ptr<IRasterSource>> components)
+        : dataset_(std::move(dataset)), components_(std::move(components)) {
+        details_ = components_.front()->details();
+        details_.width = 0;
+        details_.height = 0;
+        for (const auto& source : components_) {
+            const GeographicFootprint& footprint = source->details().footprint;
+            details_.footprint.west_longitude_degrees = std::min(
+                details_.footprint.west_longitude_degrees, footprint.west_longitude_degrees);
+            details_.footprint.east_longitude_degrees = std::max(
+                details_.footprint.east_longitude_degrees, footprint.east_longitude_degrees);
+            details_.footprint.south_latitude_degrees = std::min(
+                details_.footprint.south_latitude_degrees, footprint.south_latitude_degrees);
+            details_.footprint.north_latitude_degrees = std::max(
+                details_.footprint.north_latitude_degrees, footprint.north_latitude_degrees);
+        }
+        if (details_.footprint.east_longitude_degrees -
+                details_.footprint.west_longitude_degrees >= 360.0 - 1.0e-7) {
+            details_.footprint.west_longitude_degrees = -180.0;
+            details_.footprint.east_longitude_degrees = 180.0;
+        }
+    }
+
+    DatasetArtifact dataset_;
+    std::vector<std::unique_ptr<IRasterSource>> components_;
+    RasterSourceDetails details_;
+};
+
+[[nodiscard]] Result<std::unique_ptr<IRasterSource>> open_logical_raster(
+    const RasterConfiguration& configuration,
+    DatasetArtifact dataset) {
+    if (configuration.raster_files.size() <= 1U) {
+        return GdalRasterSource::Open(configuration, std::move(dataset));
+    }
+    return MosaicRasterSource::Open(configuration, std::move(dataset));
+}
 
 }  // namespace
 
@@ -897,7 +1087,7 @@ Result<std::unique_ptr<IRasterSource>> open_raster_source(
     if (!dataset) {
         return Result<std::unique_ptr<IRasterSource>>::failure(std::move(dataset).error());
     }
-    return GdalRasterSource::Open(configuration.rasters.front(), std::move(dataset).value());
+    return open_logical_raster(configuration.rasters.front(), std::move(dataset).value());
 }
 
 Result<std::optional<RawTerrainSample>> IRasterSource::TrySample(
@@ -950,7 +1140,7 @@ Result<std::vector<std::unique_ptr<IRasterSource>>> open_raster_sources(
             return Result<std::vector<std::unique_ptr<IRasterSource>>>::failure(
                 std::move(dataset).error());
         }
-        auto source = GdalRasterSource::Open(raster, std::move(dataset).value());
+        auto source = open_logical_raster(raster, std::move(dataset).value());
         if (!source) {
             return Result<std::vector<std::unique_ptr<IRasterSource>>>::failure(
                 std::move(source).error());

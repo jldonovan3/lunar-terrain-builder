@@ -11,6 +11,7 @@ from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import provision  # noqa: E402
+import verify_builder_locks  # noqa: E402
 
 
 class FakeResponse:
@@ -110,9 +111,41 @@ class ConfigTests(unittest.TestCase):
             "17810a5b1551a56b865f59c20ae2c78c6aa05112112c557f466e21e19d5b9351",
             artifact.canonical_bundle.sha256,
         )
+        self.assertEqual(
+            "b3f04e54c5368111df2fd5699017db29d723e8790bc8821eaa1a562f136d2e29",
+            fullset.canonical_bundle.sha256,
+        )
+        self.assertTrue(all(product.members[name].sha256 for name in fullset.members))
         self.assertTrue(set(artifact.members).issubset(fullset.members))
         self.assertEqual("Artifact", provision.resolve_profile(config, "artifact").name)
         self.assertEqual("Fullset", provision.resolve_profile(config, "FULLSET").name)
+
+    def test_committed_m8_products_and_profiles_are_fully_locked(self):
+        config = provision.load_config(Path(__file__).with_name("provisioning.json"))
+        expected = {
+            "lola_gdrdem": (12, 1848004754, "8a657dde1f0047bc5cc32a179aee38ba3e36fa081723eae2618e8a181da1909f"),
+            "lroc_nac_maskelyne": (4, 136882682, "c7b56da9de0a50839e4881c32e3cee6c6ad67f1a6629e5875779c418aa3cea36"),
+            "lola_south_polar_80s": (4, 11915218975, "a0f79e5293db691a3e06022221137d261e1de322e542c3c45add92a3280d771e"),
+        }
+        for product_name, (member_count, total_bytes, bundle_hash) in expected.items():
+            product = config.products[product_name]
+            bundle = next(iter(product.bundles.values()))
+            self.assertEqual(member_count, len(bundle.members))
+            self.assertEqual(total_bytes, bundle.total_bytes)
+            self.assertEqual(bundle_hash, bundle.canonical_bundle.sha256)
+            self.assertTrue(all(product.members[name].sha256 for name in bundle.members))
+        for profile_name in ("SLDEMBoundary", "LOLAFoundation", "Maskelyne", "SouthPolar80S"):
+            self.assertEqual(profile_name, provision.resolve_profile(config, profile_name.lower()).name)
+
+    def test_m8_builder_source_identities_match_the_provisioning_lock(self):
+        repository = Path(__file__).resolve().parent.parent
+        configs = sorted((repository / "qualification" / "m8" / "configs").glob("*.toml"))
+        self.assertEqual(
+            10,
+            verify_builder_locks.verify(
+                Path(__file__).with_name("provisioning.json"), configs
+            ),
+        )
 
     def test_changed_canonical_member_order_is_rejected(self):
         config_path = Path(__file__).with_name("provisioning.json")

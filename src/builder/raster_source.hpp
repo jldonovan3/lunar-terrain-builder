@@ -43,12 +43,7 @@ struct DatasetArtifact {
     std::string sampling_algorithm;
 };
 
-struct GeographicFootprint {
-    double west_longitude_degrees{};
-    double east_longitude_degrees{};
-    double south_latitude_degrees{};
-    double north_latitude_degrees{};
-};
+using GeographicFootprint = GeographicBounds;
 
 struct RawTerrainSample {
     double elevation_meters{};

@@ -32,6 +32,564 @@
           "md5": "d20e9cb11147652f301cc9f3e492a5ed",
           "sha256": "4d8f5edd72cdc486cbe491741a588dc545b7b72baa4cfb0e34cae7389d6305e0",
           "role": "detached-label"
+        },
+        "tiles/jp2/sldem2015_512_00n_30n_045_090.jp2": {
+          "bytes": 174985006,
+          "md5": "a10be975e97e679be982087d0e26990e",
+          "sha256": "69991a025959bd7ab13fc5b262fd4fd09d6b634d28f28d8c3fd51d5e648c2225",
+          "role": "elevation"
+        },
+        "tiles/jp2/sldem2015_512_00n_30n_045_090_aux.xml": {
+          "bytes": 3390,
+          "md5": "8fc01d16a4d30bb663418ad193deabea",
+          "sha256": "681ca5d82602e8d76f7e22d3fc3b55b56bb38dedc069def716f7f996881d3dfb",
+          "role": "auxiliary-metadata"
+        },
+        "tiles/jp2/sldem2015_512_00n_30n_045_090_jp2.lbl": {
+          "bytes": 4941,
+          "md5": "f3155686e7b2514e7103d5b8b0de27b1",
+          "sha256": "ec61671f8578a75c302a533b7560fddfcb8150112e4dab93d2c97f0e240373ab",
+          "role": "detached-label"
+        },
+        "tiles/jp2/sldem2015_512_00n_30n_090_135.jp2": {
+          "bytes": 179960396,
+          "md5": "a00347dc3599c2d5b6c52b5aa5c8f55c",
+          "sha256": "ac242735a5c787897e627b73f31f1e40ef5816cacd9b3638e57e925471466e1d",
+          "role": "elevation"
+        },
+        "tiles/jp2/sldem2015_512_00n_30n_090_135_aux.xml": {
+          "bytes": 3371,
+          "md5": "34a9bf997afccadbfaf365b484dcdecb",
+          "sha256": "95545b405a2343ee8d0ea962b62b9a60487c03b1315ba931f14432a2bfb0f44c",
+          "role": "auxiliary-metadata"
+        },
+        "tiles/jp2/sldem2015_512_00n_30n_090_135_jp2.lbl": {
+          "bytes": 4942,
+          "md5": "5cffffb0b99485a68e7cc855c67770ef",
+          "sha256": "934b31d638566af399f4ca26764e6cf27b13f04fd5daa8b4e99cd25bdb4d9a58",
+          "role": "detached-label"
+        },
+        "tiles/jp2/sldem2015_512_00n_30n_135_180.jp2": {
+          "bytes": 181379644,
+          "md5": "4fab048b43de5d94c15baf16f0ce6922",
+          "sha256": "357ab0af45ae5f02e69353dbcc1a3da20a4fe008c66bc5741a7b99278b06add4",
+          "role": "elevation"
+        },
+        "tiles/jp2/sldem2015_512_00n_30n_135_180_aux.xml": {
+          "bytes": 3387,
+          "md5": "6a915aa75b02d8dd09dfad8735159272",
+          "sha256": "02bb30c8d2cf54f0b3926fdf3b7b7946a02ee1cfe9825d8cd0c179026f51d9c9",
+          "role": "auxiliary-metadata"
+        },
+        "tiles/jp2/sldem2015_512_00n_30n_135_180_jp2.lbl": {
+          "bytes": 4943,
+          "md5": "348a58e2f38a15d08c5f01c814e4a326",
+          "sha256": "acc676be5de8f9a8e5f3a31caef49b08886e9322b9b2cc84ba9586b938879926",
+          "role": "detached-label"
+        },
+        "tiles/jp2/sldem2015_512_00n_30n_180_225.jp2": {
+          "bytes": 185451284,
+          "md5": "27ab561bc1b4060dbbffe409b2de62df",
+          "sha256": "68ad331799fb203c51daa1705f660bddb433e2246fb4616dc23a93cc6c98e93d",
+          "role": "elevation"
+        },
+        "tiles/jp2/sldem2015_512_00n_30n_180_225_aux.xml": {
+          "bytes": 3415,
+          "md5": "28338ac1100157aa39841e6d2536ae61",
+          "sha256": "336153c4bd2786d3ceb7c2f384791c515ccb425783bbcb9abbed6a4250bce03b",
+          "role": "auxiliary-metadata"
+        },
+        "tiles/jp2/sldem2015_512_00n_30n_180_225_jp2.lbl": {
+          "bytes": 4940,
+          "md5": "c8bb39654f4ad787c4e20f59a75c5cec",
+          "sha256": "c67638629df8f94b932b1339a190abaf87fdb6d7d284944560975c1f7708cbab",
+          "role": "detached-label"
+        },
+        "tiles/jp2/sldem2015_512_00n_30n_225_270.jp2": {
+          "bytes": 179571664,
+          "md5": "01cbf0a3ba15a00eb680605311855955",
+          "sha256": "9a0506df148be37a9ff9cc72204740c687d222b0c56c979ea592e9316a6ac617",
+          "role": "elevation"
+        },
+        "tiles/jp2/sldem2015_512_00n_30n_225_270_aux.xml": {
+          "bytes": 3401,
+          "md5": "e77538b112d3baf5846521976a65b457",
+          "sha256": "4b80d1dba8a0f8034ad108d44dd4307769a93514ac17eb87976ba2a330534f5c",
+          "role": "auxiliary-metadata"
+        },
+        "tiles/jp2/sldem2015_512_00n_30n_225_270_jp2.lbl": {
+          "bytes": 4944,
+          "md5": "287f2dc1bc7320bd359a3802ff64a8e9",
+          "sha256": "ce44adc0ebd64192e09242f393512701f1190a482ce5b5741179127a2d89293e",
+          "role": "detached-label"
+        },
+        "tiles/jp2/sldem2015_512_00n_30n_270_315.jp2": {
+          "bytes": 174647380,
+          "md5": "9eb39de73b7081e3049e4ef937291016",
+          "sha256": "856558b09424ccaa2d8f2af06621f32de1e13ff9f95d7797e3bb26bb23991012",
+          "role": "elevation"
+        },
+        "tiles/jp2/sldem2015_512_00n_30n_270_315_aux.xml": {
+          "bytes": 3232,
+          "md5": "26a70510b460eef8c6a4e68ca94e6b53",
+          "sha256": "64aa227e70366c3f9c4cbbd0645da148078f40d28d89910deffd8c8b07324740",
+          "role": "auxiliary-metadata"
+        },
+        "tiles/jp2/sldem2015_512_00n_30n_270_315_jp2.lbl": {
+          "bytes": 4944,
+          "md5": "ba6323a70e6c77c44b392dc7db70a657",
+          "sha256": "552fb3d66079310943635313892027b6c355426558533d2d7aaf526250542dec",
+          "role": "detached-label"
+        },
+        "tiles/jp2/sldem2015_512_00n_30n_315_360.jp2": {
+          "bytes": 172957858,
+          "md5": "1d9328fa51588f0ab3e013cae98ff114",
+          "sha256": "631ecdf55f281b6fd8cc4c387d0c5042887cff8c59ec980e31384545b3c31ddb",
+          "role": "elevation"
+        },
+        "tiles/jp2/sldem2015_512_00n_30n_315_360_aux.xml": {
+          "bytes": 3222,
+          "md5": "fdaeced5fd6b3dd922381afca6bdad45",
+          "sha256": "9563156903d292077a28e5489597c56da356f92b3c38e6d340a50f69b9b2a613",
+          "role": "auxiliary-metadata"
+        },
+        "tiles/jp2/sldem2015_512_00n_30n_315_360_jp2.lbl": {
+          "bytes": 4944,
+          "md5": "5be2bd91a5afca79c5ed59d65ba95255",
+          "sha256": "92a5cf8ae95e5d40e6d312247352cb595e7b41d6500582a9aa21a9f741b6c472",
+          "role": "detached-label"
+        },
+        "tiles/jp2/sldem2015_512_30n_60n_000_045.jp2": {
+          "bytes": 157242718,
+          "md5": "5c5fee1f2f3118f66c6cc929ecae87f9",
+          "sha256": "6c3cff1065b8495550d93f3cea6bd365cb24d5afb856070aa5d530138ed7d357",
+          "role": "elevation"
+        },
+        "tiles/jp2/sldem2015_512_30n_60n_000_045_aux.xml": {
+          "bytes": 3206,
+          "md5": "e44e9870694b9d1ef8d22d820c20d078",
+          "sha256": "de23520817da5e77d6d73218322efd175e846645df23312a9906461289721454",
+          "role": "auxiliary-metadata"
+        },
+        "tiles/jp2/sldem2015_512_30n_60n_000_045_jp2.lbl": {
+          "bytes": 4941,
+          "md5": "be08822ef8071cd3da92d8c2f419dddd",
+          "sha256": "9416425a743633febe7303ca623e5268e7116272970b0783d0bf49cca88b41ea",
+          "role": "detached-label"
+        },
+        "tiles/jp2/sldem2015_512_30n_60n_045_090.jp2": {
+          "bytes": 160772639,
+          "md5": "5561cf7136c7c1e621c621efb8cb8031",
+          "sha256": "8f98eb02baafd0f6f7778fc780bd976bbfab474ce833bc5f5aea4f07a6c5da26",
+          "role": "elevation"
+        },
+        "tiles/jp2/sldem2015_512_30n_60n_045_090_aux.xml": {
+          "bytes": 3336,
+          "md5": "9a9c751a1af8e7df4b7e566ba4536c3b",
+          "sha256": "fcd4195a4da160c611b7c89379a847c3324847a73bddf996b8dedfca3cf73735",
+          "role": "auxiliary-metadata"
+        },
+        "tiles/jp2/sldem2015_512_30n_60n_045_090_jp2.lbl": {
+          "bytes": 4942,
+          "md5": "ca110d1c4913326b9cfe91db1b14316f",
+          "sha256": "0fc4a84767b0a8c224233dc9e0af852af5e630c9575d4f5dc5e5f69780e80ed8",
+          "role": "detached-label"
+        },
+        "tiles/jp2/sldem2015_512_30n_60n_090_135.jp2": {
+          "bytes": 162887798,
+          "md5": "3ef39c3b1983d5da02424762933a4781",
+          "sha256": "97cb2b86f22e9316949c5be3d7472908d4c88f0b20c260265cef31cacdd3ce3f",
+          "role": "elevation"
+        },
+        "tiles/jp2/sldem2015_512_30n_60n_090_135_aux.xml": {
+          "bytes": 3349,
+          "md5": "294f176e190e9528c981915cba1d42f9",
+          "sha256": "a9814e00547602f28aab8cfa1530c6b9dc3e46be4718f39aae19379d942d408d",
+          "role": "auxiliary-metadata"
+        },
+        "tiles/jp2/sldem2015_512_30n_60n_090_135_jp2.lbl": {
+          "bytes": 4943,
+          "md5": "350d366b4d2565fff5802bdc8d763ecf",
+          "sha256": "2442a97206b8951dfb744e71dca07e8c1a6a1e613bed24084fbb4ac2687db3dd",
+          "role": "detached-label"
+        },
+        "tiles/jp2/sldem2015_512_30n_60n_135_180.jp2": {
+          "bytes": 156797870,
+          "md5": "f6e9d379c1034eaf63558abffb3bb2e2",
+          "sha256": "bc688161638c14376b0adafaed0f21a34eb14160a759e83b2a63c57aa523eb45",
+          "role": "elevation"
+        },
+        "tiles/jp2/sldem2015_512_30n_60n_135_180_aux.xml": {
+          "bytes": 3446,
+          "md5": "b007aebce7947d9dd6e520fef2b664c6",
+          "sha256": "495638022c9729c101def6106cd30e8ff7358bf4ab3185ed1de676b42a363c08",
+          "role": "auxiliary-metadata"
+        },
+        "tiles/jp2/sldem2015_512_30n_60n_135_180_jp2.lbl": {
+          "bytes": 4944,
+          "md5": "bd01d176d8074d617d4e3e508056a23b",
+          "sha256": "f232d0ba8701ccde875f32e6ac13ad0fd79bdb00d101b5ac51bb7108177cdc41",
+          "role": "detached-label"
+        },
+        "tiles/jp2/sldem2015_512_30n_60n_180_225.jp2": {
+          "bytes": 157436630,
+          "md5": "e1094d0492748347d2f66938c023e7df",
+          "sha256": "eb3d76223d10a164d0e20131e3d43c9016ecf2dcec7b4ec8b9a24370e9a0f3a8",
+          "role": "elevation"
+        },
+        "tiles/jp2/sldem2015_512_30n_60n_180_225_aux.xml": {
+          "bytes": 3477,
+          "md5": "1c52506ba55311ed236fe9f4833a1c23",
+          "sha256": "7962e502ae6307304dbba6c3d9f8c384fc6821ca65b32e000107461bc42d4a17",
+          "role": "auxiliary-metadata"
+        },
+        "tiles/jp2/sldem2015_512_30n_60n_180_225_jp2.lbl": {
+          "bytes": 4941,
+          "md5": "e97d1216304ba09746a7782a6fe24265",
+          "sha256": "1f298fe8b6b518b533f139c2e2bf213c1ab3e0864a9c05e669a3481a0f92bc86",
+          "role": "detached-label"
+        },
+        "tiles/jp2/sldem2015_512_30n_60n_225_270.jp2": {
+          "bytes": 157317996,
+          "md5": "623f2c0b54f14c918fa1bf6c63f6072d",
+          "sha256": "63bfebb65a10488be49429946b768ca5a5159cbbffeffa1d91dc1cbfb8452827",
+          "role": "elevation"
+        },
+        "tiles/jp2/sldem2015_512_30n_60n_225_270_aux.xml": {
+          "bytes": 3384,
+          "md5": "7b211532e3d8c8b218ba41710688e0de",
+          "sha256": "91a4f423f7e3be0286caa2d1b2a5428c67ee3864459a61a88d3b4b2a79c5689e",
+          "role": "auxiliary-metadata"
+        },
+        "tiles/jp2/sldem2015_512_30n_60n_225_270_jp2.lbl": {
+          "bytes": 4945,
+          "md5": "768c004b3497b4150bec1dbaaba18bf4",
+          "sha256": "c52cf588dac7f85aa2d11fca3ed4b0cfc24e3d117113966160544e4ce2f6f944",
+          "role": "detached-label"
+        },
+        "tiles/jp2/sldem2015_512_30n_60n_270_315.jp2": {
+          "bytes": 156017168,
+          "md5": "58406da3c08e6c51a2590498ecb27bb6",
+          "sha256": "2049b82484d3c1ccf1f534dcb62b401e9899df09ed6544acaf1cff5c1add79aa",
+          "role": "elevation"
+        },
+        "tiles/jp2/sldem2015_512_30n_60n_270_315_aux.xml": {
+          "bytes": 3312,
+          "md5": "0b0e063e926645bcf18a8c871e066d4c",
+          "sha256": "ecfcd96a1b31ddd9c2882cc695fd494f61527ebe40c027bbe2043a871b03cbaa",
+          "role": "auxiliary-metadata"
+        },
+        "tiles/jp2/sldem2015_512_30n_60n_270_315_jp2.lbl": {
+          "bytes": 4945,
+          "md5": "b24ac11b18b82494b2fb08a869cfedfd",
+          "sha256": "ec93509e2269748a217faa0b24ebf0ad77f879718117e78a3eefa9cc5ae0afe9",
+          "role": "detached-label"
+        },
+        "tiles/jp2/sldem2015_512_30n_60n_315_360.jp2": {
+          "bytes": 159919400,
+          "md5": "89bfadb4368e4d126b5ece06ec460fce",
+          "sha256": "348d369eed0258db2cf3d0d93e363e3ccc79022da65025dabc967046bd7ccdea",
+          "role": "elevation"
+        },
+        "tiles/jp2/sldem2015_512_30n_60n_315_360_aux.xml": {
+          "bytes": 3314,
+          "md5": "8fd5cd5b10f17edfcca729a57400da91",
+          "sha256": "b28db970764b66735a412fec1d4e3623353ed6884d14e9d6671b5906746ebf02",
+          "role": "auxiliary-metadata"
+        },
+        "tiles/jp2/sldem2015_512_30n_60n_315_360_jp2.lbl": {
+          "bytes": 4945,
+          "md5": "7dc3a7487cbf325a01594668c17daec9",
+          "sha256": "438b1f36942c4ed929fc07c0c669588bb56a2b29ce63c76e2cc87dea55a898db",
+          "role": "detached-label"
+        },
+        "tiles/jp2/sldem2015_512_30s_00s_000_045.jp2": {
+          "bytes": 180960285,
+          "md5": "bb21513069dffe586ce1153b79cf6354",
+          "sha256": "56637587a9c96c82bb7895a97316e5f7eed0523c4b98c6cac3f2a728f9fe2336",
+          "role": "elevation"
+        },
+        "tiles/jp2/sldem2015_512_30s_00s_000_045_aux.xml": {
+          "bytes": 3383,
+          "md5": "15b72f72a8db25131771ef76dd46b9e0",
+          "sha256": "67a4c98e66f59579fd6766dd467896eeb7b2e0278464bb22c1e8f7ce04d0d27f",
+          "role": "auxiliary-metadata"
+        },
+        "tiles/jp2/sldem2015_512_30s_00s_000_045_jp2.lbl": {
+          "bytes": 4938,
+          "md5": "8bc157ae1801519c6012e7a9ae873c41",
+          "sha256": "054a427785c2975a709c87683fb8dee829876d60fe159b900ccb13e550638c1f",
+          "role": "detached-label"
+        },
+        "tiles/jp2/sldem2015_512_30s_00s_045_090.jp2": {
+          "bytes": 176704925,
+          "md5": "70ed204b4a0c5a98f54e998196233e15",
+          "sha256": "76fec0130302a304d98d7a5816c14ea72380dcd5d592d68880b78e48e38082fa",
+          "role": "elevation"
+        },
+        "tiles/jp2/sldem2015_512_30s_00s_045_090_aux.xml": {
+          "bytes": 3385,
+          "md5": "6c04d0808a1169c23e645117660e91ca",
+          "sha256": "2490a4371e636df573e69fff93ef9040de33516af56d1b5a1d8022351cb3c126",
+          "role": "auxiliary-metadata"
+        },
+        "tiles/jp2/sldem2015_512_30s_00s_045_090_jp2.lbl": {
+          "bytes": 4939,
+          "md5": "bed8e0a02eb0459183bf27ba02a4bea5",
+          "sha256": "b117fb5923868adc13459fcfe45fc22e28fb72f83e639974c75028419beecb15",
+          "role": "detached-label"
+        },
+        "tiles/jp2/sldem2015_512_30s_00s_090_135.jp2": {
+          "bytes": 181530985,
+          "md5": "b32c5bef6d981c604ac020fa3d18f8ff",
+          "sha256": "9f23f36de8c50bacc796eb80b63b242891c0fbf964bc6b5b9d1fb3ea87037c51",
+          "role": "elevation"
+        },
+        "tiles/jp2/sldem2015_512_30s_00s_090_135_aux.xml": {
+          "bytes": 3409,
+          "md5": "eda4c8d20d58f698eb672d731a72453d",
+          "sha256": "33a9e7a1a41864eb04e457f493680834c5b122dc6fb323bde9ddc2a87cea4ace",
+          "role": "auxiliary-metadata"
+        },
+        "tiles/jp2/sldem2015_512_30s_00s_090_135_jp2.lbl": {
+          "bytes": 4940,
+          "md5": "7adaa04c0fe947a91dbbcb64c4e83d71",
+          "sha256": "41e1b3ea5f383904b565e17638e62f55a7edfcd3eafff8b83c464a63aa3b80c4",
+          "role": "detached-label"
+        },
+        "tiles/jp2/sldem2015_512_30s_00s_135_180.jp2": {
+          "bytes": 181512509,
+          "md5": "da7cb0eec0b215c06d53e6a26db4eac4",
+          "sha256": "ec1d7034bd639f1442e58e7d726c79bb0529d5abf04474458d4ad59b64770c90",
+          "role": "elevation"
+        },
+        "tiles/jp2/sldem2015_512_30s_00s_135_180_aux.xml": {
+          "bytes": 3426,
+          "md5": "49b4c4265e616aeaea35ecc0280890b9",
+          "sha256": "f6785541c28659b659afe9937eef8bfad40c45d92f37ee5eeb339a5aa589d2aa",
+          "role": "auxiliary-metadata"
+        },
+        "tiles/jp2/sldem2015_512_30s_00s_135_180_jp2.lbl": {
+          "bytes": 4941,
+          "md5": "02770aabe5c48f664cd21cee5aab261b",
+          "sha256": "4d07ed07dbb6d55bf410ed30906ecd7ec9d373dd51830855d96d6ac4b77034dd",
+          "role": "detached-label"
+        },
+        "tiles/jp2/sldem2015_512_30s_00s_180_225.jp2": {
+          "bytes": 185055432,
+          "md5": "181661367c7fe9dd84b27773ac32a26f",
+          "sha256": "18cfcd0e36b25b539e7fc99f4acf9ffcbe04301b7f7ece5f6bb97926f10397dc",
+          "role": "elevation"
+        },
+        "tiles/jp2/sldem2015_512_30s_00s_180_225_aux.xml": {
+          "bytes": 3487,
+          "md5": "51aaa112385e7cb29f1d8341630e7aaf",
+          "sha256": "72de0f30c95f233b755b7aa858231f2e992b9010c52381ef2881ff32f145daae",
+          "role": "auxiliary-metadata"
+        },
+        "tiles/jp2/sldem2015_512_30s_00s_180_225_jp2.lbl": {
+          "bytes": 4938,
+          "md5": "84a72fa1c15d71f60f342daef872ea60",
+          "sha256": "e19b0cb3cd086877e8839bc60586f4d229dcf93ab6bbf9bde7e1cbb2ee738c03",
+          "role": "detached-label"
+        },
+        "tiles/jp2/sldem2015_512_30s_00s_225_270.jp2": {
+          "bytes": 184464042,
+          "md5": "4bcfc3376c1b2de177b57bf9a583241f",
+          "sha256": "162e4c74943a637e5aa48770219ab27858f8b8d97b9819c374fe1b4f381cd66e",
+          "role": "elevation"
+        },
+        "tiles/jp2/sldem2015_512_30s_00s_225_270_aux.xml": {
+          "bytes": 3414,
+          "md5": "5685c130822fdb034d4b0c356e03a686",
+          "sha256": "731cf8d2e6d4afe1dd1738b4ae0a44b649ec736b16aa889533386bf5f8aa7cf1",
+          "role": "auxiliary-metadata"
+        },
+        "tiles/jp2/sldem2015_512_30s_00s_225_270_jp2.lbl": {
+          "bytes": 4942,
+          "md5": "e8ed875b98b3327240545b16665f1578",
+          "sha256": "7e82a9086d7157cf6faf2a2a076b3f90ce3a5e727d8a0d7031dd9660cf4a9c24",
+          "role": "detached-label"
+        },
+        "tiles/jp2/sldem2015_512_30s_00s_270_315.jp2": {
+          "bytes": 185038126,
+          "md5": "2875832be8a0a7a96bbc0f3c3d8b86de",
+          "sha256": "5c78c369b46433de2460cdf1405daf50395cc43e1c0da3c286458ef3c3196ef9",
+          "role": "elevation"
+        },
+        "tiles/jp2/sldem2015_512_30s_00s_270_315_aux.xml": {
+          "bytes": 3358,
+          "md5": "76b0312ffd595cd96ba87f4e77902272",
+          "sha256": "18346d101a28948650e524bad59d44e0c73b5c06b82d1e530edf689fbbb8f9f0",
+          "role": "auxiliary-metadata"
+        },
+        "tiles/jp2/sldem2015_512_30s_00s_270_315_jp2.lbl": {
+          "bytes": 4942,
+          "md5": "b9d327f8e63423b9835ff3ac6e538e1c",
+          "sha256": "498ad46ec787160008c23ebcc3548c9a09804b88a8d01d5f8bbeccfc9f15dd00",
+          "role": "detached-label"
+        },
+        "tiles/jp2/sldem2015_512_30s_00s_315_360.jp2": {
+          "bytes": 175131646,
+          "md5": "7173643b456bab6c3f5ea51f08d1c829",
+          "sha256": "810f27b5b4ec51bc1268423eef0cc8af20584e1dffcb0302b7b7d4d959006609",
+          "role": "elevation"
+        },
+        "tiles/jp2/sldem2015_512_30s_00s_315_360_aux.xml": {
+          "bytes": 3303,
+          "md5": "d0b49b5a5594d6d44bf8188b0157231c",
+          "sha256": "6ee959953ca8753167116818328a295daf2668af5e1c084c1bfffdda7fd5806c",
+          "role": "auxiliary-metadata"
+        },
+        "tiles/jp2/sldem2015_512_30s_00s_315_360_jp2.lbl": {
+          "bytes": 4942,
+          "md5": "df04ca1b96d0422a5ba5ddbebd50d37d",
+          "sha256": "199fb6ca95086fad89e12f1317a6db4cfe541dbdae9077a441ff84c5a68de66d",
+          "role": "detached-label"
+        },
+        "tiles/jp2/sldem2015_512_60s_30s_000_045.jp2": {
+          "bytes": 168884899,
+          "md5": "31c75ff6034f7162aad6df6919a92b45",
+          "sha256": "a0c30299bc4f46e65e5bf77c64fb466f4a603440473a6b0d40fc39bd63e7d949",
+          "role": "elevation"
+        },
+        "tiles/jp2/sldem2015_512_60s_30s_000_045_aux.xml": {
+          "bytes": 3400,
+          "md5": "589823a817fd4dce71cee95dde6ba247",
+          "sha256": "2b81ca1dace3f20130c6c97ddbbc1e3ed306c362976f1fdb9ab651f5cc8facc3",
+          "role": "auxiliary-metadata"
+        },
+        "tiles/jp2/sldem2015_512_60s_30s_000_045_jp2.lbl": {
+          "bytes": 4944,
+          "md5": "b1b1c1ef561bb4bf2fb6cb4be984421e",
+          "sha256": "830e8a283fddaaa7c3fb586b93ba713fe96888940dc7301c3009eae70d665f0f",
+          "role": "detached-label"
+        },
+        "tiles/jp2/sldem2015_512_60s_30s_045_090.jp2": {
+          "bytes": 167538527,
+          "md5": "d399d9de24e4bf033bfa273a268f6ab5",
+          "sha256": "42eef7a4b1dd92af2f913f2ea6e6ce85ac0e9735f8c46e508c6fd8d4fad07525",
+          "role": "elevation"
+        },
+        "tiles/jp2/sldem2015_512_60s_30s_045_090_aux.xml": {
+          "bytes": 3354,
+          "md5": "44afe58659c56b9d376611ed55e67283",
+          "sha256": "7d52853950e72f3a582f95f8e60857e4fa2ee740d69f666d25dbe01e898421fe",
+          "role": "auxiliary-metadata"
+        },
+        "tiles/jp2/sldem2015_512_60s_30s_045_090_jp2.lbl": {
+          "bytes": 4945,
+          "md5": "4070000aba520c64f7fe5f6cf0543b5b",
+          "sha256": "433363d356101fcc69b84ee51a2c6e074a29dad396e9a0e6c9105ea50d62a7a2",
+          "role": "detached-label"
+        },
+        "tiles/jp2/sldem2015_512_60s_30s_090_135.jp2": {
+          "bytes": 164081545,
+          "md5": "ee1424a24d57d1ce78e7c912f2b0a45d",
+          "sha256": "77e10a43b4f8319ae766062ba105e0867ef462ec92c913d58425e43b7c0962c8",
+          "role": "elevation"
+        },
+        "tiles/jp2/sldem2015_512_60s_30s_090_135_aux.xml": {
+          "bytes": 3406,
+          "md5": "bf804be81fa80987e3cef650872b6153",
+          "sha256": "32fce7114c2c0989e2c1471398014e6dcbee07c917693039189c3e8acfd27076",
+          "role": "auxiliary-metadata"
+        },
+        "tiles/jp2/sldem2015_512_60s_30s_090_135_jp2.lbl": {
+          "bytes": 4946,
+          "md5": "0030574d58af37f2c6a5990fcf2ea8b3",
+          "sha256": "680cbb9ab603055aafd1639b5ac1b22c36894245e42141a4c754a8e35c876409",
+          "role": "detached-label"
+        },
+        "tiles/jp2/sldem2015_512_60s_30s_135_180.jp2": {
+          "bytes": 159706299,
+          "md5": "7a3810caa680b852cbe626429d02816c",
+          "sha256": "0f79b98eb8404b75f91b70604c1ef5460ecf27c201a6a5e040a3809514367d49",
+          "role": "elevation"
+        },
+        "tiles/jp2/sldem2015_512_60s_30s_135_180_aux.xml": {
+          "bytes": 3434,
+          "md5": "257d34415ff8c83477b53e1db0ea7178",
+          "sha256": "fa881d764397e9d03598b1dfb5e651c0da7beb1365452e34612918af79955ef1",
+          "role": "auxiliary-metadata"
+        },
+        "tiles/jp2/sldem2015_512_60s_30s_135_180_jp2.lbl": {
+          "bytes": 4947,
+          "md5": "de537500e099e16097726a54eb91c29c",
+          "sha256": "4af12d82146d323f6b4b7211282b366896c9df29daadbcb1bca01e33ca7f386d",
+          "role": "detached-label"
+        },
+        "tiles/jp2/sldem2015_512_60s_30s_180_225.jp2": {
+          "bytes": 164417584,
+          "md5": "ae9c9aa1f7e6ac8a92079f4d93b83666",
+          "sha256": "62724ce6aab79a0711cabaf880507cd87abdc610a43807baccb9a7914acf2ba4",
+          "role": "elevation"
+        },
+        "tiles/jp2/sldem2015_512_60s_30s_180_225_aux.xml": {
+          "bytes": 3364,
+          "md5": "71df2112aeba02a11b93efe36bc34be3",
+          "sha256": "edae5a499652eb8059cb0a1ad7366eb16a5a6ef362afc4ae4708d98f65398f23",
+          "role": "auxiliary-metadata"
+        },
+        "tiles/jp2/sldem2015_512_60s_30s_180_225_jp2.lbl": {
+          "bytes": 4944,
+          "md5": "c9eeda8515d5afadc7f062eb841150fc",
+          "sha256": "fbb54304529ae5589665b5d3799027226ca767b5df045bc804e3f0398bdc50f4",
+          "role": "detached-label"
+        },
+        "tiles/jp2/sldem2015_512_60s_30s_225_270.jp2": {
+          "bytes": 165637009,
+          "md5": "236cf74e9bf1dc01a0aeba88fdc5defe",
+          "sha256": "e0f409373c64321d6db5dafc5cb4e37446005e991bbcfe7702f54dcf16586864",
+          "role": "elevation"
+        },
+        "tiles/jp2/sldem2015_512_60s_30s_225_270_aux.xml": {
+          "bytes": 3471,
+          "md5": "aca65daf229a0cf251308c265ed5d426",
+          "sha256": "4067921837d644c880be61bf8a60e1f4affaa7467395726b2d09e77b33bde2ad",
+          "role": "auxiliary-metadata"
+        },
+        "tiles/jp2/sldem2015_512_60s_30s_225_270_jp2.lbl": {
+          "bytes": 4948,
+          "md5": "d9b860d4ed402b01a9bf750ebf8a3c78",
+          "sha256": "e7d586c258377f797457d306b8ff493d50f0fa4f8256c185ee6e4e15c0429082",
+          "role": "detached-label"
+        },
+        "tiles/jp2/sldem2015_512_60s_30s_270_315.jp2": {
+          "bytes": 166632064,
+          "md5": "da8e2f17cf0865352d731adbd89d7a95",
+          "sha256": "993f713e59c57846a137cedbbd9b3a798175dec99c6b3c8e57012e7c62919c3b",
+          "role": "elevation"
+        },
+        "tiles/jp2/sldem2015_512_60s_30s_270_315_aux.xml": {
+          "bytes": 3410,
+          "md5": "4e37a2d141d7d87b575babc58c06b703",
+          "sha256": "e1c3176b7615a0639b89686943f36b8e5478fd17978e2cd9ddcb6f3d012f74c0",
+          "role": "auxiliary-metadata"
+        },
+        "tiles/jp2/sldem2015_512_60s_30s_270_315_jp2.lbl": {
+          "bytes": 4948,
+          "md5": "1e31d540b43cfc72567a654bf72e6ad3",
+          "sha256": "ace441ca2c82f24815a5f72086fefcf8657fb7ff79df93db6d55a1790e19fb91",
+          "role": "detached-label"
+        },
+        "tiles/jp2/sldem2015_512_60s_30s_315_360.jp2": {
+          "bytes": 169985544,
+          "md5": "33d19b879cc45788a4f226cc5b61cdb4",
+          "sha256": "1abc996eea7d4d2433d47447d5aba18bc1d389215dc924e224ba9fe632d619e8",
+          "role": "elevation"
+        },
+        "tiles/jp2/sldem2015_512_60s_30s_315_360_aux.xml": {
+          "bytes": 3360,
+          "md5": "b8498582f40ce6dfb0d4068fcab2a414",
+          "sha256": "c34fc7c2a6c4bea32058c8f530583eedcd901f7c89b19364c1fad697aaee0101",
+          "role": "auxiliary-metadata"
+        },
+        "tiles/jp2/sldem2015_512_60s_30s_315_360_jp2.lbl": {
+          "bytes": 4948,
+          "md5": "d45d66e7658ded582132e4c95e68ebac",
+          "sha256": "fcc8702d1c16d0cacd32118adf04f8b7ea17438642c96c43f8bf251114dded1e",
+          "role": "detached-label"
         }
       },
       "checksum_manifests": {
@@ -158,7 +716,241 @@
           ],
           "total_bytes": 5466757104,
           "upstream_checksum_manifest": "pds-lrolol-1xxx-260615",
-          "sha256_manifest": "SLDEM2015_512ppd_SHA256SUMS.txt"
+          "sha256_manifest": "SLDEM2015_512ppd_SHA256SUMS.txt",
+          "canonical_bundle": {
+            "domain": "LTDB_ARTIFACT_BUNDLE_V1",
+            "sha256": "b3f04e54c5368111df2fd5699017db29d723e8790bc8821eaa1a562f136d2e29"
+          }
+        },
+        "north_boundary": {
+          "description": "SLDEM2015 30 to 60 degrees north, 0 to 45 degrees east artifact",
+          "members": [
+            "tiles/jp2/sldem2015_512_30n_60n_000_045.jp2",
+            "tiles/jp2/sldem2015_512_30n_60n_000_045_aux.xml",
+            "tiles/jp2/sldem2015_512_30n_60n_000_045_jp2.lbl"
+          ],
+          "total_bytes": 157250865,
+          "canonical_bundle": {
+            "domain": "LTDB_ARTIFACT_BUNDLE_V1",
+            "sha256": "d3b75017785fe5734b50c6941d66b6df3adafd2cbde73a2e50ad723edb9f2e12"
+          }
+        }
+      }
+    },
+    "lola_gdrdem": {
+      "display_name": "LOLA GDR LDEM_256 global foundation",
+      "dataset_key": "nasa.lro.lola.gdr.ldem256.v3_0.lro_es_52",
+      "revision": "lrolol_1xxx_260615-ldem_256-v3.0-lro_es_52",
+      "provenance_uri": "https://pds-geosciences.wustl.edu/lro/lro-l-lola-3-rdr-v1/lrolol_1xxx/data/lola_gdr/cylindrical/jp2/",
+      "root_environment": "LOLA_GDRDEM_ROOT",
+      "download_base_url": "https://pds-geosciences.wustl.edu/lro/lro-l-lola-3-rdr-v1/lrolol_1xxx/data/lola_gdr/",
+      "members": {
+        "cylindrical/jp2/ldem_256_00n_90n_000_180.jp2": {
+          "bytes": 427545233,
+          "sha256": "9c188a81bc33d3874ac1ef96768947e665e997df3f76431707f8adda7a981797",
+          "role": "elevation",
+          "md5": "5ba6cea7e4b50a2516d1c2ca062aa238"
+        },
+        "cylindrical/jp2/ldem_256_00n_90n_000_180_aux.xml": {
+          "bytes": 2743,
+          "sha256": "deb1636af9109c9c5ec535d86e3acd469679da519cae066d936372b68bb65ff6",
+          "role": "auxiliary-metadata",
+          "md5": "6a6ce2b3ac40b545b430adeaa0a8f6c8"
+        },
+        "cylindrical/jp2/ldem_256_00n_90n_000_180_jp2.lbl": {
+          "bytes": 6598,
+          "sha256": "64f095de4f0da2b5c56700f3a49857b7acc4055dacab72612d79669928302630",
+          "role": "detached-label",
+          "md5": "a48ef2a82ab90707a387987b94469bb5"
+        },
+        "cylindrical/jp2/ldem_256_00n_90n_180_360.jp2": {
+          "bytes": 418539506,
+          "sha256": "a0e173b204fa4838028e9018beda868ad3d77211aae076e2ae966a2ba21380e2",
+          "role": "elevation",
+          "md5": "b1f5680e1d7d9d0a466b20b84b657a45"
+        },
+        "cylindrical/jp2/ldem_256_00n_90n_180_360_aux.xml": {
+          "bytes": 2732,
+          "sha256": "54344508688535f11399b49f52b6d7f69e6537f97cb10e59493514b5e5abe907",
+          "role": "auxiliary-metadata",
+          "md5": "7954a8f0637c7e83c528b3d63b6c2393"
+        },
+        "cylindrical/jp2/ldem_256_00n_90n_180_360_jp2.lbl": {
+          "bytes": 6592,
+          "sha256": "1e50354d96b3bfbf839adc3eab58d99cac99819a72c1e3aad7e7c3baf52bc05a",
+          "role": "detached-label",
+          "md5": "b084941a3a1a05135455217217e31157"
+        },
+        "cylindrical/jp2/ldem_256_90s_00s_000_180.jp2": {
+          "bytes": 500914193,
+          "sha256": "00053f297259d24553fd517042925805a601a5d72d9db4ca5d1e09bdbafba96f",
+          "role": "elevation",
+          "md5": "d5811930358a4fc99ec3c1144f4cbe33"
+        },
+        "cylindrical/jp2/ldem_256_90s_00s_000_180_aux.xml": {
+          "bytes": 2794,
+          "sha256": "441523838f6149e7120860099dfb8244a9ba2a970a9d2e04cba44fdf6891f587",
+          "role": "auxiliary-metadata",
+          "md5": "db34450297088af3c33422c8f1871c2f"
+        },
+        "cylindrical/jp2/ldem_256_90s_00s_000_180_jp2.lbl": {
+          "bytes": 6595,
+          "sha256": "10ac079bd8318bb4124d419dfbf7f53f60b191695432d0e35d958662c203dcc6",
+          "role": "detached-label",
+          "md5": "0d56ef1fbc781480b62d3ab85901dd10"
+        },
+        "cylindrical/jp2/ldem_256_90s_00s_180_360.jp2": {
+          "bytes": 500968345,
+          "sha256": "8a3f54db4c3c7c7b6accd74504ec94a0f8f3a3b43276f6283e91afcd7caac90f",
+          "role": "elevation",
+          "md5": "c056683a6991b69060c86045cc968a14"
+        },
+        "cylindrical/jp2/ldem_256_90s_00s_180_360_aux.xml": {
+          "bytes": 2834,
+          "sha256": "f689a0883dcc8be263fef3ec199e92b75338ecb3f26daa357e4de51280f6c519",
+          "role": "auxiliary-metadata",
+          "md5": "36bed335f4b1d11efa129f9406e18ca3"
+        },
+        "cylindrical/jp2/ldem_256_90s_00s_180_360_jp2.lbl": {
+          "bytes": 6589,
+          "sha256": "a2a4d8917a64c3c1ab82e26b485b5e837d7d2640c91d8875fcf19c872d9a9c7c",
+          "role": "detached-label",
+          "md5": "3596cd8a80cd670267946b97194210c6"
+        }
+      },
+      "checksum_manifests": {
+        "pds-lrolol-1xxx-260615": {
+          "url": "https://pds-geosciences.wustl.edu/lro/lro-l-lola-3-rdr-v1/lrolol_1xxx_260615.md5",
+          "path": "pds-lrolol_1xxx_260615.md5",
+          "format": "pds_md5",
+          "member_path_prefix": "cylindrical/jp2/"
+        }
+      },
+      "bundles": {
+        "global": {
+          "description": "Four-tile lossless global LOLA LDEM_256 with PDS sidecars",
+          "members": [
+            "cylindrical/jp2/ldem_256_00n_90n_000_180.jp2",
+            "cylindrical/jp2/ldem_256_00n_90n_000_180_aux.xml",
+            "cylindrical/jp2/ldem_256_00n_90n_000_180_jp2.lbl",
+            "cylindrical/jp2/ldem_256_00n_90n_180_360.jp2",
+            "cylindrical/jp2/ldem_256_00n_90n_180_360_aux.xml",
+            "cylindrical/jp2/ldem_256_00n_90n_180_360_jp2.lbl",
+            "cylindrical/jp2/ldem_256_90s_00s_000_180.jp2",
+            "cylindrical/jp2/ldem_256_90s_00s_000_180_aux.xml",
+            "cylindrical/jp2/ldem_256_90s_00s_000_180_jp2.lbl",
+            "cylindrical/jp2/ldem_256_90s_00s_180_360.jp2",
+            "cylindrical/jp2/ldem_256_90s_00s_180_360_aux.xml",
+            "cylindrical/jp2/ldem_256_90s_00s_180_360_jp2.lbl"
+          ],
+          "total_bytes": 1848004754,
+          "canonical_bundle": {
+            "domain": "LTDB_ARTIFACT_BUNDLE_V1",
+            "sha256": "8a657dde1f0047bc5cc32a179aee38ba3e36fa081723eae2618e8a181da1909f"
+          },
+          "upstream_checksum_manifest": "pds-lrolol-1xxx-260615"
+        }
+      }
+    },
+    "lroc_nac_maskelyne": {
+      "display_name": "LROC NAC DTM MASKELYNE",
+      "dataset_key": "nasa.lro.lroc.nac_dtm_maskelyne.v1_9",
+      "revision": "lrolrc_2001-nac_dtm_maskelyne-v1.9",
+      "provenance_uri": "https://data.lroc.im-ldi.com/lroc/view_rdr/NAC_DTM_MASKELYNE",
+      "root_environment": "LROC_NAC_MASKELYNE_ROOT",
+      "download_base_url": "https://pds.lroc.im-ldi.com/data/LRO-L-LROC-5-RDR-V1.0/LROLRC_2001/DATA/SDP/NAC_DTM/MASKELYNE/",
+      "members": {
+        "data/NAC_DTM_MASKELYNE.LBL": {
+          "bytes": 3564,
+          "sha256": "4902d85a7deaf07e227a3ceb3b1ae0ab48241b8626356fa89bda5f1a9b7779ed",
+          "role": "detached-label",
+          "md5": "d0c651dd4dc46933a9ae16d53b419e32",
+          "url": "https://pds.lroc.im-ldi.com/data/LRO-L-LROC-5-RDR-V1.0/LROLRC_2001/DATA/SDP/NAC_DTM/MASKELYNE/NAC_DTM_MASKELYNE.LBL"
+        },
+        "data/NAC_DTM_MASKELYNE.TIF": {
+          "bytes": 109511167,
+          "sha256": "fe51b592de0cb46325d620ed6aa6d184b8c6f4fc2b93ddff6f486761df8087c8",
+          "role": "elevation",
+          "md5": "e89929094f89702f5fd87fe7973f4f3a",
+          "url": "https://pds.lroc.im-ldi.com/data/LRO-L-LROC-5-RDR-V1.0/LROLRC_2001/DATA/SDP/NAC_DTM/MASKELYNE/NAC_DTM_MASKELYNE.TIF"
+        },
+        "data/NAC_DTM_MASKELYNE_CONF.IMG": {
+          "bytes": 27359280,
+          "sha256": "5e05340a178cf52a532c883facfafebe42dd497e6620704308a479e1cd2434b0",
+          "role": "quality-confidence",
+          "md5": "4c999730e4580bc93bca8fd663bc580e",
+          "url": "https://pds.lroc.im-ldi.com/data/LRO-L-LROC-5-RDR-V1.0/LROLRC_2001/DATA/SDP/NAC_DTM/MASKELYNE/NAC_DTM_MASKELYNE_CONF.IMG"
+        },
+        "data/NAC_DTM_MASKELYNE_README.TXT": {
+          "bytes": 8671,
+          "sha256": "39f6a5336912eee973cd25e0b92273c8a7657b7a071af6c71f320bbb6c6a6f9e",
+          "role": "documentation",
+          "md5": "688112ddcc6230fb30cb1a0b45abd702",
+          "url": "https://pds.lroc.im-ldi.com/data/LRO-L-LROC-5-RDR-V1.0/LROLRC_2001/DATA/SDP/NAC_DTM/MASKELYNE/NAC_DTM_MASKELYNE_README.TXT"
+        }
+      },
+      "checksum_manifests": {},
+      "bundles": {
+        "artifact": {
+          "description": "Maskelyne elevation, confidence, label, and product documentation",
+          "members": [
+            "data/NAC_DTM_MASKELYNE.LBL",
+            "data/NAC_DTM_MASKELYNE.TIF",
+            "data/NAC_DTM_MASKELYNE_CONF.IMG",
+            "data/NAC_DTM_MASKELYNE_README.TXT"
+          ],
+          "total_bytes": 136882682,
+          "canonical_bundle": {
+            "domain": "LTDB_ARTIFACT_BUNDLE_V1",
+            "sha256": "c7b56da9de0a50839e4881c32e3cee6c6ad67f1a6629e5875779c418aa3cea36"
+          }
+        }
+      }
+    },
+    "lola_south_polar_80s": {
+      "display_name": "NASA GSFC south-polar LOLA adjusted DEM bundle",
+      "dataset_key": "nasa.gsfc.lola.south_pole_80s.adjusted.2023_07_07",
+      "revision": "gsfcpgda-lola-spole-2023-07-07",
+      "provenance_uri": "https://doi.org/10.60903/gsfcpgda-lola-spole",
+      "root_environment": "LOLA_SOUTH_POLAR_80S_ROOT",
+      "download_base_url": "https://pgda.gsfc.nasa.gov/data/LOLA_20mpp/",
+      "members": {
+        "LDEC_80S_20MPP_ADJ.TIF": {
+          "bytes": 1289746965,
+          "sha256": "a29315a23d54cb5056e3ca25329ce678882c49429db302d7f7e4560c76e09f86",
+          "role": "quality-count"
+        },
+        "LDEM_80S_20MPP_ADJ.TIF": {
+          "bytes": 2696082051,
+          "sha256": "09b7ca80f9e6a146f970225d18af72fc02787669b3ef51b888e347d2b6845649",
+          "role": "elevation"
+        },
+        "LDEM_80S_20MPP_ADJ_EFFRES.TIF": {
+          "bytes": 3974680758,
+          "sha256": "1f38e0a0ae78191e7dba7aa21395acb7e8f55d769f556524d3105cd7eaf9f5c0",
+          "role": "quality-effective-resolution"
+        },
+        "LDEM_80S_20MPP_ADJ_ERR.TIF": {
+          "bytes": 3954709201,
+          "sha256": "d64045b8aa58a24010f009ab5667ae02cc06cffa7796784dd5e2d48b3059d8cf",
+          "role": "quality-elevation-error"
+        }
+      },
+      "checksum_manifests": {},
+      "bundles": {
+        "artifact": {
+          "description": "80S adjusted elevation, count, effective resolution, and elevation error",
+          "members": [
+            "LDEC_80S_20MPP_ADJ.TIF",
+            "LDEM_80S_20MPP_ADJ.TIF",
+            "LDEM_80S_20MPP_ADJ_EFFRES.TIF",
+            "LDEM_80S_20MPP_ADJ_ERR.TIF"
+          ],
+          "total_bytes": 11915218975,
+          "canonical_bundle": {
+            "domain": "LTDB_ARTIFACT_BUNDLE_V1",
+            "sha256": "a0f79e5293db691a3e06022221137d261e1de322e542c3c45add92a3280d771e"
+          }
         }
       }
     }
@@ -177,6 +969,34 @@
       "verify_bundles": [
         "artifact",
         "fullset"
+      ]
+    },
+    "SLDEMBoundary": {
+      "product": "sldem2015",
+      "download_bundle": "north_boundary",
+      "verify_bundles": [
+        "north_boundary"
+      ]
+    },
+    "LOLAFoundation": {
+      "product": "lola_gdrdem",
+      "download_bundle": "global",
+      "verify_bundles": [
+        "global"
+      ]
+    },
+    "Maskelyne": {
+      "product": "lroc_nac_maskelyne",
+      "download_bundle": "artifact",
+      "verify_bundles": [
+        "artifact"
+      ]
+    },
+    "SouthPolar80S": {
+      "product": "lola_south_polar_80s",
+      "download_bundle": "artifact",
+      "verify_bundles": [
+        "artifact"
       ]
     }
   }
