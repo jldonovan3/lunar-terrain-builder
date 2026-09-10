@@ -169,12 +169,18 @@ TEST_CASE("M7 export writes meshes raster samples raw elevation and provenance")
     CHECK(std::filesystem::file_size(provenance_path) == 13U + 64U * 64U * 3U);
 }
 
-TEST_CASE("M7 benchmark records the scale-gate metrics and deterministic reuse") {
+TEST_CASE("benchmark v2 records separate phases, partial evidence, and deterministic reuse") {
     TemporaryDirectory temporary;
     const BuilderConfiguration configuration =
         synthetic_configuration(temporary.path(), "benchmark");
-    auto report = benchmark_configuration(configuration);
+    ExecutionOptions options;
+    options.run_id = "benchmark-test";
+    TelemetryCollector collector{"benchmark", options};
+    REQUIRE(collector.Start());
+    options.telemetry = &collector;
+    auto report = benchmark_configuration(configuration, options);
     REQUIRE(report);
+    REQUIRE(collector.Finish(ProgressState::passed));
     CHECK(report.value().planned_tile_count == 6);
     CHECK(report.value().built_tile_count == 6);
     CHECK(report.value().reused_tile_count == 6);
@@ -186,12 +192,35 @@ TEST_CASE("M7 benchmark records the scale-gate metrics and deterministic reuse")
     CHECK(report.value().compression_ratio > 0.0);
     CHECK(report.value().incremental_reuse_ratio == 1.0);
     CHECK(report.value().deterministic_rebuild);
+    CHECK(report.value().benchmark_schema == "lunar-terrain-benchmark-v2");
+    CHECK(report.value().status == "passed");
+    CHECK(report.value().scan_complete);
+    CHECK(report.value().plan_complete);
+    CHECK(report.value().clean_build_complete);
+    CHECK(report.value().validation_complete);
+    CHECK(report.value().incremental_build_complete);
+    CHECK(report.value().scan_seconds >= 0.0);
+    CHECK(report.value().plan_seconds >= 0.0);
+    REQUIRE(report.value().plan_level_counts.size() == 1);
+    CHECK(report.value().plan_level_counts.front().level == 0);
+    CHECK(report.value().plan_level_counts.front().tile_count == 6);
+    for (const std::string_view category : {
+             "encoding", "packing", "plan", "projection", "publication",
+             "quantization", "sampling", "scan", "seam_resolution", "sqlite",
+             "validation"}) {
+        CHECK(report.value().telemetry.categorized_seconds.contains(category));
+    }
 
     const auto output = temporary.path() / "benchmark.json";
     REQUIRE(write_benchmark_report(report.value(), output));
     const auto bytes = read_bytes(output);
     const std::string text{bytes.begin(), bytes.end()};
-    CHECK(text.find("\"benchmark_schema\":\"lunar-terrain-m7-v1\"") != std::string::npos);
+    CHECK(text.find("\"benchmark_schema\":\"lunar-terrain-benchmark-v2\"") != std::string::npos);
+    CHECK(text.find("\"status\":\"passed\"") != std::string::npos);
+    CHECK(text.find("\"scan_seconds\":") != std::string::npos);
+    CHECK(text.find("\"plan_seconds\":") != std::string::npos);
+    CHECK(text.find("\"level_counts\":[{\"level\":0,\"tile_count\":6}]") !=
+          std::string::npos);
     CHECK(text.find("\"deterministic_rebuild\":true") != std::string::npos);
 }
 

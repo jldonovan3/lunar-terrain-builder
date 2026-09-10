@@ -56,6 +56,13 @@ struct TileHierarchyMetadata {
     std::uint8_t maximum_level,
     double reference_radius_meters = lunar_reference_radius_meters);
 
+// Uses the same conservative curvilinear-footprint test as sparse planning.
+// Builder execution uses this to keep per-tile source dependencies aligned
+// with the nodes selected by plan_sparse_hierarchy().
+[[nodiscard]] Result<bool> tile_intersects_source_footprint(
+    LunarTileKey key,
+    const GeographicFootprint& footprint);
+
 // Plans intersecting target-level nodes and every direct ancestor. Output is
 // unique and sorted by encoded TileKey.
 [[nodiscard]] Result<SparseHierarchyPlan> plan_sparse_hierarchy(

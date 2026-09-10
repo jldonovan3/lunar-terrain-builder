@@ -99,6 +99,8 @@ target_sources(
         src/builder/tile_staging.hpp
         src/builder/task_executor.cpp
         src/builder/task_executor.hpp
+        src/builder/telemetry.cpp
+        src/builder/telemetry.hpp
 )
 target_include_directories(lunar_terrain_builder_lib PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src")
 target_compile_features(lunar_terrain_builder_lib PUBLIC cxx_std_20)
@@ -168,6 +170,7 @@ if(LUNAR_TERRAIN_BUILD_TESTING)
         tests/builder/packing_tests.cpp
         tests/builder/projection_oracle_tests.cpp
         tests/builder/raster_source_tests.cpp
+        tests/builder/telemetry_tests.cpp
         tests/builder/tile_staging_tests.cpp
     )
     target_compile_features(lunar_terrain_builder_tests PRIVATE cxx_std_20)
@@ -216,6 +219,31 @@ if(LUNAR_TERRAIN_BUILD_TESTING)
                 -p "test_*.py" -v
     )
     add_test(
+        NAME observer.unit
+        COMMAND Python3::Interpreter -m unittest discover
+                -s "${CMAKE_CURRENT_SOURCE_DIR}/tools"
+                -p "test_*.py" -v
+    )
+    add_test(
+        NAME cli.exit-codes
+        COMMAND Python3::Interpreter
+                "${CMAKE_CURRENT_SOURCE_DIR}/tools/check_cli_exit_codes.py"
+                --binary $<TARGET_FILE:lunar-terrain>
+    )
+    add_test(
+        NAME cli.cancel-resume
+        COMMAND Python3::Interpreter
+                "${CMAKE_CURRENT_SOURCE_DIR}/tools/check_cli_cancel_resume.py"
+                --binary $<TARGET_FILE:lunar-terrain>
+    )
+    set_tests_properties(cli.cancel-resume PROPERTIES TIMEOUT 60)
+    add_test(
+        NAME qualification.m8-runner-unit
+        COMMAND Python3::Interpreter -m unittest discover
+                -s "${CMAKE_CURRENT_SOURCE_DIR}/qualification/m8"
+                -p "test_*.py" -v
+    )
+    add_test(
         NAME qualification.m8-builder-lock-consistency
         COMMAND Python3::Interpreter
                 "${CMAKE_CURRENT_SOURCE_DIR}/provisioning/verify_builder_locks.py"
@@ -223,6 +251,7 @@ if(LUNAR_TERRAIN_BUILD_TESTING)
                 "${CMAKE_CURRENT_SOURCE_DIR}/qualification/m8/configs/profile_a.toml"
                 "${CMAKE_CURRENT_SOURCE_DIR}/qualification/m8/configs/profile_b.toml"
                 "${CMAKE_CURRENT_SOURCE_DIR}/qualification/m8/configs/profile_c.toml"
+                "${CMAKE_CURRENT_SOURCE_DIR}/qualification/m8/configs/scale_probe.toml"
                 "${CMAKE_CURRENT_SOURCE_DIR}/qualification/m8/configs/scale.toml"
     )
 

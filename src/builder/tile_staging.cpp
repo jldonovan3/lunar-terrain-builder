@@ -676,7 +676,6 @@ Result<void> resolve_elevation_boundaries(const std::span<StagedElevationTile> t
     }
 
     std::map<std::uint64_t, std::size_t> by_key;
-    std::optional<std::uint8_t> level;
     for (std::size_t index = 0; index < tiles.size(); ++index) {
         if (tiles[index].core_samples.size() != core_sample_count) {
             return Result<void>::failure(staging_error(
@@ -685,14 +684,6 @@ Result<void> resolve_elevation_boundaries(const std::span<StagedElevationTile> t
                 tiles[index].artifact_path,
                 tiles[index].key));
         }
-        if (level && *level != tiles[index].key.level()) {
-            return Result<void>::failure(staging_error(
-                ErrorCode::invalid_argument,
-                "one seam-resolution batch must contain a single QSC level",
-                std::nullopt,
-                tiles[index].key));
-        }
-        level = tiles[index].key.level();
         if (!by_key.emplace(tiles[index].key.encoded(), index).second) {
             return Result<void>::failure(staging_error(
                 ErrorCode::invalid_argument,
@@ -814,6 +805,21 @@ Result<std::vector<FinalizedElevationTile>> finalize_elevation_tiles(
         return failure<std::vector<FinalizedElevationTile>>(
             ErrorCode::invalid_argument, "elevation sampler is empty");
     }
+    std::vector<ElevationSampler> samplers(tiles.size(), sampler);
+    return finalize_elevation_tiles(tiles, samplers);
+}
+
+Result<std::vector<FinalizedElevationTile>> finalize_elevation_tiles(
+    const std::span<const StagedElevationTile> tiles,
+    const std::span<const ElevationSampler> samplers) {
+    if (samplers.size() != tiles.size() ||
+        std::ranges::any_of(samplers, [](const ElevationSampler& sampler) {
+            return !sampler;
+        })) {
+        return failure<std::vector<FinalizedElevationTile>>(
+            ErrorCode::invalid_argument,
+            "tile-specific elevation samplers must be nonempty and parallel to staged tiles");
+    }
 
     std::vector<FinalizedElevationTile> finalized;
     finalized.reserve(tiles.size());
@@ -855,7 +861,9 @@ Result<std::vector<FinalizedElevationTile>> finalize_elevation_tiles(
         finalized.push_back(std::move(tile));
     }
 
-    for (FinalizedElevationTile& tile : finalized) {
+    for (std::size_t tile_index = 0; tile_index < finalized.size(); ++tile_index) {
+        FinalizedElevationTile& tile = finalized[tile_index];
+        const ElevationSampler& sampler = samplers[tile_index];
         for (const QscEdge edge : edges) {
             auto neighbor = qsc_tile_neighbor(tile.key, edge);
             if (!neighbor) {

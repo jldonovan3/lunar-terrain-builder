@@ -16,6 +16,7 @@ version = 1
 cells = 256
 apron = 1
 max_level = 10
+materialize_hierarchy = true
 
 [packaging]
 target_pack_bytes = 1073741824

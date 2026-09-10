@@ -38,6 +38,12 @@ enum class FusionPolicy : std::uint8_t {
     residual_refinement_v1,
 };
 
+enum class RasterQualityPolicy : std::uint8_t {
+    none,
+    maskelyne_confidence_v1,
+    lola_south_polar_v1,
+};
+
 struct GeographicBounds {
     double west_longitude_degrees{};
     double east_longitude_degrees{};
@@ -95,6 +101,7 @@ struct RasterConfiguration {
     std::int32_t priority{};
     RasterSourceRole role{RasterSourceRole::base};
     FusionPolicy fusion_policy{FusionPolicy::replace};
+    RasterQualityPolicy quality_policy{RasterQualityPolicy::none};
     ElevationRepresentation elevation_representation{ElevationRepresentation::elevation_meters};
     NoDataPolicy no_data_policy{NoDataPolicy::error};
     bool metadata_override{};
@@ -113,6 +120,7 @@ struct BuilderConfiguration {
     std::uint32_t worker_threads{1};
     std::int32_t synthetic_amplitude_meters{2'048};
     std::uint8_t maximum_level{};
+    bool materialize_hierarchy{};
     std::optional<GeographicBounds> required_region;
 };
 

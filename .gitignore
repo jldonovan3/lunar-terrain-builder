@@ -1,6 +1,7 @@
 /.vs/
 /.vscode/
 /CMakeUserPresets.json
+/.env.local
 /out/
 /build/
 /vcpkg_installed/

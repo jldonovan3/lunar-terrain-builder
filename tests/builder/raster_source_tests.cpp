@@ -6,11 +6,14 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <future>
 #include <iterator>
 #include <memory>
 #include <numbers>
+#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
@@ -49,6 +52,44 @@ public:
 
 private:
     std::filesystem::path path_;
+};
+
+class ScopedEnvironmentVariable {
+public:
+    ScopedEnvironmentVariable(const std::string& name, const std::string& value)
+        : name_(name) {
+#ifdef _WIN32
+        char* previous = nullptr;
+        std::size_t length = 0;
+        REQUIRE(_dupenv_s(&previous, &length, name.c_str()) == 0);
+        if (previous != nullptr) {
+            previous_ = previous;
+            std::free(previous);
+        }
+        REQUIRE(_putenv_s(name.c_str(), value.c_str()) == 0);
+#else
+        if (const char* previous = std::getenv(name.c_str()); previous != nullptr) {
+            previous_ = previous;
+        }
+        REQUIRE(setenv(name.c_str(), value.c_str(), 1) == 0);
+#endif
+    }
+
+    ~ScopedEnvironmentVariable() {
+#ifdef _WIN32
+        static_cast<void>(_putenv_s(name_.c_str(), previous_ ? previous_->c_str() : ""));
+#else
+        if (previous_) {
+            static_cast<void>(setenv(name_.c_str(), previous_->c_str(), 1));
+        } else {
+            static_cast<void>(unsetenv(name_.c_str()));
+        }
+#endif
+    }
+
+private:
+    std::string name_;
+    std::optional<std::string> previous_;
 };
 
 struct DatasetDeleter {
@@ -345,6 +386,10 @@ TEST_CASE("generated GDAL raster catalogs plans and builds deterministic P1 outp
     REQUIRE(plan.value().sources.size() == 1);
     CHECK(plan.value().sources.front().target_level == 7);
     CHECK_FALSE(plan.value().level_counts.empty());
+    const std::string plan_json = format_report(plan.value(), true);
+    CHECK(plan_json.find(
+        "\"prototype_tiles\":[\"" + plan.value().tiles.front().to_string() + "\"]") !=
+        std::string::npos);
 
     auto first_build = build_configuration(first.value());
     auto second_build = build_configuration(second.value(), BuildOptions{true, {}});
@@ -488,6 +533,220 @@ TEST_CASE("M5 overlapping rasters serialize deterministic provenance and quality
     CHECK(std::ranges::count(transition_text, '\n') > 1);
 }
 
+void write_byte_raster(
+    const std::filesystem::path& path,
+    const int width,
+    const int height,
+    const std::uint8_t value) {
+    GDALAllRegister();
+    GDALDriver* driver = GetGDALDriverManager()->GetDriverByName("GTiff");
+    REQUIRE(driver != nullptr);
+    DatasetPtr dataset{driver->Create(path.string().c_str(), width, height, 1, GDT_Byte, nullptr)};
+    REQUIRE(dataset != nullptr);
+    set_lunar_georeferencing(*dataset, width, height);
+    GDALRasterBand* band = dataset->GetRasterBand(1);
+    REQUIRE(band != nullptr);
+    std::vector<std::uint8_t> values(static_cast<std::size_t>(width) * height, value);
+    REQUIRE(band->RasterIO(
+        GF_Write, 0, 0, width, height, values.data(), width, height,
+        GDT_Byte, 0, 0, nullptr) == CE_None);
+}
+
+TEST_CASE("M8 raster build materializes the complete planned hierarchy") {
+    TemporaryDirectory temporary;
+    constexpr int width = 8;
+    constexpr int height = 8;
+    write_integer_raster(temporary.path() / "base.tif", width, height, false);
+    write_integer_raster(temporary.path() / "refinement.tif", width, height, false);
+
+    const auto raster_entry = [](const std::string_view key,
+                                 const std::string_view member,
+                                 const int priority) {
+        return "[[raster]]\n"
+               "stable_key = \"" + std::string{key} + "\"\n"
+               "source_uri = \"fixture://" + std::string{key} + "\"\n"
+               "original_crs = \"configured global lunar geographic\"\n"
+               "raster_member = \"" + std::string{member} + "\"\n"
+               "expected_data_type = \"Int16\"\n"
+               "artifact_members = [{ name = \"" + std::string{member} + "\" }]\n"
+               "expected_width = 8\n"
+               "expected_height = 8\n"
+               "west_longitude_degrees = -180.0\n"
+               "east_longitude_degrees = 180.0\n"
+               "south_latitude_degrees = -90.0\n"
+               "north_latitude_degrees = 90.0\n"
+               "nominal_resolution_meters = 12000.0\n"
+               "effective_resolution_meters = 12000.0\n"
+               "source_no_data = -32768.0\n"
+               "sample_scale = 0.5\n"
+               "sample_offset = 0.0\n"
+               "elevation_representation = \"elevation_meters\"\n"
+               "no_data_policy = \"error\"\n"
+               "metadata_override = true\n"
+               "priority = " + std::to_string(priority) + "\n"
+               "fusion_policy = \"Replace\"\n\n";
+    };
+    const std::string base = raster_entry("generated.global.base.m8.v1", "base.tif", 0);
+    const std::string refinement = raster_entry(
+        "generated.global.refinement.m8.v1", "refinement.tif", 100);
+    const auto configuration_text = [&](const std::filesystem::path& output,
+                                        const std::filesystem::path& cache,
+                                        const bool reversed) {
+        return "[database]\n"
+               "name = \"M8FullHierarchy\"\n"
+               "output_directory = \"" + path_text(output) + "\"\n"
+               "\n[tiles]\n"
+               "max_level = 1\n"
+               "materialize_hierarchy = true\n\n" +
+               (reversed ? refinement + base : base + refinement) +
+               "[local]\n"
+               "source_root = \"" + path_text(temporary.path()) + "\"\n"
+               "cache_directory = \"" + path_text(cache) + "\"\n"
+               "threads = 2\n";
+    };
+
+    const auto first_path = temporary.path() / "first.toml";
+    const auto second_path = temporary.path() / "second.toml";
+    write_text(
+        first_path,
+        configuration_text(temporary.path() / "first-output", temporary.path() / "first-cache", false));
+    write_text(
+        second_path,
+        configuration_text(temporary.path() / "second-output", temporary.path() / "second-cache", true));
+    auto first_configuration = load_configuration(first_path);
+    auto second_configuration = load_configuration(second_path);
+    REQUIRE(first_configuration);
+    REQUIRE(second_configuration);
+    auto plan = plan_configuration(first_configuration.value());
+    REQUIRE(plan);
+    CHECK(plan.value().expected_hierarchy_tiles.size() == 30);
+
+    auto first = build_configuration(first_configuration.value());
+    auto second = build_configuration(second_configuration.value());
+    REQUIRE(first);
+    REQUIRE(second);
+    CHECK(first.value().tile_count == plan.value().expected_hierarchy_tiles.size());
+    CHECK(first.value().database_content_hash == second.value().database_content_hash);
+    auto incremental = build_configuration(
+        first_configuration.value(), BuildOptions{true, {}});
+    REQUIRE(incremental);
+    CHECK(incremental.value().reused_tile_count == first.value().tile_count);
+    CHECK(incremental.value().database_content_hash == first.value().database_content_hash);
+    auto validation = validate_database(first.value().database_path, true);
+    REQUIRE(validation);
+    CHECK(validation.value().verified_hierarchy_tiles == 30);
+    CHECK(validation.value().verified_seams == 60);
+}
+
+TEST_CASE("M8 decoded raster cache is canonical reusable and corruption checked") {
+    TemporaryDirectory temporary;
+    constexpr int width = 2'049;
+    constexpr int height = 2'049;
+    const auto source_root = temporary.path() / "source";
+    std::filesystem::create_directories(source_root);
+    const auto raster_path = source_root / "large.tif";
+    write_integer_raster(raster_path, width, height, false);
+    const auto configuration_path = temporary.path() / "cache.toml";
+    write_text(
+        configuration_path,
+        raster_configuration_text(
+            source_root,
+            temporary.path() / "output",
+            "large.tif",
+            width,
+            height,
+            "Int16",
+            "elevation_meters",
+            "error",
+            true));
+    auto configuration = load_configuration(configuration_path);
+    REQUIRE(configuration);
+    auto identity = identify_configuration(configuration.value());
+    REQUIRE(identity);
+    const auto decoded_cache = temporary.path() / "decoded-cache";
+    ScopedEnvironmentVariable cache_environment{
+        "LUNAR_TERRAIN_DECODED_CACHE", decoded_cache.string()};
+    const std::array coordinates{
+        LunarGeodeticCoordinate{
+            -2.0 / (180.0 / std::numbers::pi_v<double>),
+            -2.0 / (180.0 / std::numbers::pi_v<double>),
+            0.0},
+        LunarGeodeticCoordinate{
+            2.0 / (180.0 / std::numbers::pi_v<double>),
+            2.0 / (180.0 / std::numbers::pi_v<double>),
+            0.0},
+    };
+
+    ExecutionOptions first_options;
+    TelemetryCollector first_telemetry{"source-open", first_options};
+    auto first_source = open_raster_source(
+        configuration.value(), identity.value(), &first_telemetry);
+    REQUIRE(first_source);
+    auto first = first_source.value()->SampleBatch(coordinates);
+    REQUIRE(first);
+    REQUIRE(std::filesystem::exists(decoded_cache));
+    std::vector<std::filesystem::path> cache_files;
+    for (const auto& entry : std::filesystem::directory_iterator(decoded_cache)) {
+        if (entry.is_regular_file()) {
+            cache_files.push_back(entry.path());
+        }
+    }
+    REQUIRE(cache_files.size() == 1);
+    const TelemetrySnapshot first_snapshot = first_telemetry.Snapshot();
+    CHECK(first_snapshot.decoded_cache_misses == 1);
+    CHECK(first_snapshot.decoded_cache_live_bytes > 0);
+
+    ExecutionOptions second_options;
+    TelemetryCollector second_telemetry{"source-open", second_options};
+    auto second_source = open_raster_source(
+        configuration.value(), identity.value(), &second_telemetry);
+    REQUIRE(second_source);
+    auto second = second_source.value()->SampleBatch(coordinates);
+    REQUIRE(second);
+    const TelemetrySnapshot second_snapshot = second_telemetry.Snapshot();
+    CHECK(second_snapshot.decoded_cache_hits == 1);
+    CHECK(second_snapshot.decoded_cache_live_bytes ==
+          first_snapshot.decoded_cache_live_bytes);
+    REQUIRE(second.value().size() == first.value().size());
+    for (std::size_t index = 0; index < first.value().size(); ++index) {
+        REQUIRE(second.value()[index]);
+        REQUIRE(first.value()[index]);
+        CHECK(second.value()[index]->elevation_meters ==
+              first.value()[index]->elevation_meters);
+        CHECK(second.value()[index]->interpolated == first.value()[index]->interpolated);
+        CHECK(second.value()[index]->filled_no_data == first.value()[index]->filled_no_data);
+        CHECK(second.value()[index]->quality_flags == first.value()[index]->quality_flags);
+    }
+    std::array<std::future<Result<std::vector<std::optional<RawTerrainSample>>>>, 8> concurrent;
+    for (auto& future : concurrent) {
+        future = std::async(std::launch::async, [&] {
+            return second_source.value()->SampleBatch(coordinates);
+        });
+    }
+    for (auto& future : concurrent) {
+        auto sampled = future.get();
+        REQUIRE(sampled);
+        CHECK(sampled.value()[0]->elevation_meters == first.value()[0]->elevation_meters);
+        CHECK(sampled.value()[1]->elevation_meters == first.value()[1]->elevation_meters);
+    }
+
+    std::fstream cache_stream(
+        cache_files.front(), std::ios::binary | std::ios::in | std::ios::out);
+    REQUIRE(cache_stream.is_open());
+    cache_stream.seekg(100, std::ios::beg);
+    char byte = 0;
+    cache_stream.read(&byte, 1);
+    REQUIRE(cache_stream.good());
+    byte = static_cast<char>(static_cast<unsigned char>(byte) ^ 0x5AU);
+    cache_stream.seekp(100, std::ios::beg);
+    cache_stream.write(&byte, 1);
+    cache_stream.close();
+
+    auto corrupted_source = open_raster_source(configuration.value(), identity.value());
+    REQUIRE_FALSE(corrupted_source);
+    CHECK(corrupted_source.error().code == ErrorCode::checksum_mismatch);
+}
+
 TEST_CASE("raster no-data policy is explicit and deterministic") {
     TemporaryDirectory temporary;
     const auto source_root = temporary.path() / "source";
@@ -521,6 +780,52 @@ TEST_CASE("raster no-data policy is explicit and deterministic") {
     auto filled = nearest_source.value()->Sample(LunarGeodeticCoordinate{});
     REQUIRE(filled);
     CHECK(filled.value().filled_no_data);
+}
+
+TEST_CASE("M8 Maskelyne confidence companions map into v1 quality") {
+    TemporaryDirectory temporary;
+    const auto source_root = temporary.path() / "source";
+    std::filesystem::create_directories(source_root);
+    write_integer_raster(source_root / "elevation.tif", 64, 64, false);
+    write_byte_raster(source_root / "confidence.tif", 64, 64, 3);
+    std::string text = raster_configuration_text(
+        source_root,
+        temporary.path() / "output",
+        "elevation.tif",
+        64,
+        64,
+        "Int16",
+        "elevation_meters",
+        "error",
+        false);
+    const std::string member = "artifact_members = [{ name = \"elevation.tif\" }]\n";
+    const std::size_t member_position = text.find(member);
+    REQUIRE(member_position != std::string::npos);
+    text.replace(
+        member_position,
+        member.size(),
+        "artifact_members = [{ name = \"elevation.tif\" }, { name = \"confidence.tif\" }]\n"
+        "quality_mapping = \"generated Maskelyne confidence mapping\"\n"
+        "quality_members = [\"confidence.tif\"]\n"
+        "quality_policy = \"MaskelyneConfidence_v1\"\n");
+    const auto configuration_path = temporary.path() / "confidence.toml";
+    write_text(configuration_path, text);
+    auto configuration = load_configuration(configuration_path);
+    REQUIRE(configuration);
+    auto identity = identify_configuration(configuration.value());
+    REQUIRE(identity);
+    auto source = open_raster_source(configuration.value(), identity.value());
+    REQUIRE(source);
+    auto sample = source.value()->Sample(LunarGeodeticCoordinate{});
+    REQUIRE(sample);
+    CHECK((sample.value().quality_flags & quality_interpolated) != 0);
+    CHECK((sample.value().quality_flags & quality_lower_confidence) != 0);
+    const std::array coordinates{LunarGeodeticCoordinate{}, LunarGeodeticCoordinate{}};
+    auto batch = source.value()->SampleBatch(coordinates);
+    REQUIRE(batch);
+    REQUIRE(batch.value().size() == coordinates.size());
+    REQUIRE(batch.value().front());
+    CHECK((batch.value().front()->quality_flags & quality_lower_confidence) != 0);
 }
 
 TEST_CASE("radius rasters require an explicit metadata override and datum normalization") {

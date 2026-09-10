@@ -293,7 +293,15 @@ bool DiffReport::identical() const noexcept {
 
 Result<DiffReport> diff_databases(
     const std::filesystem::path& before_path,
-    const std::filesystem::path& after_path) {
+    const std::filesystem::path& after_path,
+    const ExecutionOptions& options) {
+    if (options.telemetry != nullptr) {
+        options.telemetry->SetPhase("diff");
+    }
+    auto execution = check_execution(options);
+    if (!execution) {
+        return Result<DiffReport>::failure(std::move(execution).error());
+    }
     auto before_database = LunarTerrainDatabase::Open(before_path);
     if (!before_database) {
         return Result<DiffReport>::failure(std::move(before_database).error());
@@ -325,6 +333,10 @@ Result<DiffReport> diff_databases(
     std::size_t before_index = 0;
     std::size_t after_index = 0;
     while (before_index < before_tiles.size() || after_index < after_tiles.size()) {
+        execution = check_execution(options);
+        if (!execution) {
+            return Result<DiffReport>::failure(std::move(execution).error());
+        }
         if (after_index == after_tiles.size() ||
             (before_index < before_tiles.size() &&
              before_tiles[before_index].key < after_tiles[after_index].key)) {
@@ -346,6 +358,11 @@ Result<DiffReport> diff_databases(
             }
             ++before_index;
             ++after_index;
+        }
+        if (options.telemetry != nullptr) {
+            options.telemetry->SetWork(
+                before_index + after_index,
+                before_tiles.size() + after_tiles.size());
         }
     }
     report.package_layout_changed =
@@ -400,51 +417,154 @@ std::string format_report(const DiffReport& report, const bool json) {
         report.package_layout_changes.size());
 }
 
-Result<BenchmarkReport> benchmark_configuration(const BuilderConfiguration& configuration) {
-    const auto catalog_start = Clock::now();
-    auto scan = scan_configuration(configuration);
-    const auto catalog_end = Clock::now();
-    if (!scan) {
-        return Result<BenchmarkReport>::failure(std::move(scan).error());
-    }
-    auto plan = plan_configuration(configuration);
-    if (!plan) {
-        return Result<BenchmarkReport>::failure(std::move(plan).error());
-    }
-
-    const auto build_start = Clock::now();
-    auto clean = build_configuration(configuration, BuildOptions{false, {}});
-    const auto build_end = Clock::now();
-    if (!clean) {
-        return Result<BenchmarkReport>::failure(std::move(clean).error());
-    }
-
-    const auto validation_start = Clock::now();
-    auto validation = validate_database(clean.value().database_path, true);
-    const auto validation_end = Clock::now();
-    if (!validation) {
-        return Result<BenchmarkReport>::failure(std::move(validation).error());
-    }
-
-    auto staging = directory_bytes(configuration.cache_directory / "staging");
-    if (!staging) {
-        return Result<BenchmarkReport>::failure(std::move(staging).error());
-    }
-
-    const auto incremental_start = Clock::now();
-    auto incremental = build_configuration(configuration, BuildOptions{true, {}});
-    const auto incremental_end = Clock::now();
-    if (!incremental) {
-        return Result<BenchmarkReport>::failure(std::move(incremental).error());
-    }
-
+Result<BenchmarkReport> benchmark_configuration(
+    const BuilderConfiguration& configuration,
+    const ExecutionOptions& options) {
     BenchmarkReport report;
+    report.run_id = options.run_id;
     report.host_platform = host_platform();
     report.compiler = compiler_identity();
     report.build_configuration = build_configuration();
     report.worker_threads = configuration.worker_threads;
-    report.builder_configuration_hash = clean.value().builder_configuration_hash;
-    report.planned_tile_count = plan.value().tiles.size();
+    report.budgets = options.budgets;
+    report.resumed = options.resume;
+
+    const auto persist = [&]() -> Result<void> {
+        if (options.partial_report_path.empty()) {
+            return Result<void>::success();
+        }
+        return write_benchmark_report(report, options.partial_report_path);
+    };
+    const auto fail = [&](Error error) -> Result<BenchmarkReport> {
+        report.status = error.code == ErrorCode::cancelled ? "cancelled" : "failed";
+        report.error = error;
+        if (options.telemetry != nullptr) {
+            report.telemetry = options.telemetry->Snapshot();
+        }
+        auto written = persist();
+        if (!written) {
+            return Result<BenchmarkReport>::failure(std::move(written).error());
+        }
+        return Result<BenchmarkReport>::failure(std::move(error));
+    };
+
+    auto written = persist();
+    if (!written) {
+        return Result<BenchmarkReport>::failure(std::move(written).error());
+    }
+
+    std::optional<PreparedSourceCatalog> prepared_catalog;
+    ExecutionOptions phase_options = options;
+    if (configuration.source_kind == BuilderSourceKind::raster) {
+        report.active_phase = "source_catalog";
+        if (options.telemetry != nullptr) {
+            options.telemetry->SetPhase("source_catalog", 0, configuration.rasters.size());
+        }
+        auto prepared = prepare_source_catalog(configuration, options.telemetry);
+        if (!prepared) {
+            return fail(std::move(prepared).error());
+        }
+        prepared_catalog.emplace(std::move(prepared).value());
+        phase_options.prepared_source_catalog = &*prepared_catalog;
+    }
+
+    report.active_phase = "scan";
+    const auto scan_start = Clock::now();
+    auto scan = scan_configuration(configuration, phase_options);
+    const auto scan_end = Clock::now();
+    report.scan_seconds = seconds_between(scan_start, scan_end);
+    report.catalog_seconds = report.scan_seconds;
+    if (!scan) {
+        return fail(std::move(scan).error());
+    }
+    report.builder_configuration_hash = scan.value().builder_configuration_hash;
+    report.scan_complete = true;
+    written = persist();
+    if (!written) {
+        return Result<BenchmarkReport>::failure(std::move(written).error());
+    }
+    if (options.telemetry != nullptr) {
+        auto checkpoint = options.telemetry->Checkpoint("benchmark-scan");
+        if (!checkpoint) {
+            return fail(std::move(checkpoint).error());
+        }
+    }
+
+    report.active_phase = "plan";
+    const auto plan_start = Clock::now();
+    auto plan = plan_configuration(configuration, phase_options);
+    const auto plan_end = Clock::now();
+    report.plan_seconds = seconds_between(plan_start, plan_end);
+    if (!plan) {
+        return fail(std::move(plan).error());
+    }
+    report.planned_tile_count = plan.value().expected_hierarchy_tiles.size();
+    report.representative_tiles = plan.value().tiles;
+    report.plan_level_counts = plan.value().level_counts;
+    report.plan_complete = true;
+    written = persist();
+    if (!written) {
+        return Result<BenchmarkReport>::failure(std::move(written).error());
+    }
+    if (options.telemetry != nullptr) {
+        auto checkpoint = options.telemetry->Checkpoint("benchmark-plan");
+        if (!checkpoint) {
+            return fail(std::move(checkpoint).error());
+        }
+    }
+
+    report.active_phase = "clean_build";
+    const auto build_start = Clock::now();
+    auto clean = build_configuration(
+        configuration,
+        BuildOptions{false, phase_options.cancellation, phase_options});
+    const auto build_end = Clock::now();
+    report.clean_build_seconds = seconds_between(build_start, build_end);
+    if (!clean) {
+        return fail(std::move(clean).error());
+    }
+    report.clean_build_complete = true;
+    report.database_content_hash = clean.value().database_content_hash;
+    report.ordered_pack_hashes.reserve(clean.value().packs.size());
+    for (const PackBuildReport& pack : clean.value().packs) {
+        report.ordered_pack_hashes.push_back(pack.sha256);
+    }
+    written = persist();
+    if (!written) {
+        return Result<BenchmarkReport>::failure(std::move(written).error());
+    }
+
+    report.active_phase = "validation";
+    const auto validation_start = Clock::now();
+    auto validation = validate_database(clean.value().database_path, true, phase_options);
+    const auto validation_end = Clock::now();
+    report.validation_seconds = seconds_between(validation_start, validation_end);
+    if (!validation) {
+        return fail(std::move(validation).error());
+    }
+    report.validation_complete = true;
+    written = persist();
+    if (!written) {
+        return Result<BenchmarkReport>::failure(std::move(written).error());
+    }
+
+    auto staging = directory_bytes(configuration.cache_directory / "staging");
+    if (!staging) {
+        return fail(std::move(staging).error());
+    }
+
+    report.active_phase = "incremental_build";
+    const auto incremental_start = Clock::now();
+    auto incremental = build_configuration(
+        configuration,
+        BuildOptions{true, phase_options.cancellation, phase_options});
+    const auto incremental_end = Clock::now();
+    report.incremental_build_seconds = seconds_between(incremental_start, incremental_end);
+    if (!incremental) {
+        return fail(std::move(incremental).error());
+    }
+    report.incremental_build_complete = true;
+
     report.sampled_core_vertices =
         clean.value().built_tile_count * std::uint64_t{format_v1::core_vertices} *
         format_v1::core_vertices;
@@ -452,12 +572,12 @@ Result<BenchmarkReport> benchmark_configuration(const BuilderConfiguration& conf
     report.peak_resident_memory_bytes = peak_resident_memory_bytes();
     auto database = LunarTerrainDatabase::Open(clean.value().database_path);
     if (!database) {
-        return Result<BenchmarkReport>::failure(std::move(database).error());
+        return fail(std::move(database).error());
     }
     for (const TileIndexEntry& entry : database.value().TileIndex()) {
         if (entry.logical_channel_bytes >
             (std::numeric_limits<std::uint64_t>::max)() - report.uncompressed_channel_bytes) {
-            return Result<BenchmarkReport>::failure(Error{
+            return fail(Error{
                 ErrorCode::arithmetic_overflow,
                 "benchmark uncompressed channel byte total overflowed"});
         }
@@ -469,10 +589,6 @@ Result<BenchmarkReport> benchmark_configuration(const BuilderConfiguration& conf
     report.pack_count = static_cast<std::uint32_t>(clean.value().packs.size());
     report.built_tile_count = clean.value().built_tile_count;
     report.reused_tile_count = incremental.value().reused_tile_count;
-    report.catalog_seconds = seconds_between(catalog_start, catalog_end);
-    report.clean_build_seconds = seconds_between(build_start, build_end);
-    report.validation_seconds = seconds_between(validation_start, validation_end);
-    report.incremental_build_seconds = seconds_between(incremental_start, incremental_end);
     if (report.clean_build_seconds > 0.0) {
         report.sampling_throughput_samples_per_second =
             static_cast<double>(report.sampled_core_vertices) / report.clean_build_seconds;
@@ -491,34 +607,121 @@ Result<BenchmarkReport> benchmark_configuration(const BuilderConfiguration& conf
     }
     report.deterministic_rebuild = same_published_identity(clean.value(), incremental.value());
     if (!report.deterministic_rebuild) {
-        return Result<BenchmarkReport>::failure(Error{
+        return fail(Error{
             ErrorCode::hash_mismatch,
             "benchmark incremental rebuild did not reproduce the clean published identity"});
+    }
+    report.status = "passed";
+    report.active_phase = "complete";
+    if (options.telemetry != nullptr) {
+        report.telemetry = options.telemetry->Snapshot();
+        const auto source_samples = report.telemetry.named_counts.find("requested_source_samples");
+        if (source_samples != report.telemetry.named_counts.end()) {
+            report.requested_source_samples = source_samples->second;
+        }
+        const auto halo_samples = report.telemetry.named_counts.find("requested_halo_samples");
+        if (halo_samples != report.telemetry.named_counts.end()) {
+            report.requested_halo_samples = halo_samples->second;
+        }
+    }
+    written = persist();
+    if (!written) {
+        return Result<BenchmarkReport>::failure(std::move(written).error());
     }
     return Result<BenchmarkReport>::success(report);
 }
 
 std::string format_report(const BenchmarkReport& report, const bool json) {
     if (json) {
+        std::string pack_hashes;
+        for (std::size_t index = 0; index < report.ordered_pack_hashes.size(); ++index) {
+            if (index != 0) {
+                pack_hashes.push_back(',');
+            }
+            pack_hashes += json_string(report.ordered_pack_hashes[index].to_hex());
+        }
+        std::string prototype_tiles;
+        for (std::size_t index = 0; index < report.representative_tiles.size(); ++index) {
+            if (index != 0) {
+                prototype_tiles.push_back(',');
+            }
+            prototype_tiles += json_string(report.representative_tiles[index].to_string());
+        }
+        std::string level_counts;
+        for (std::size_t index = 0; index < report.plan_level_counts.size(); ++index) {
+            if (index != 0) {
+                level_counts.push_back(',');
+            }
+            level_counts += fmt::format(
+                "{{\"level\":{},\"tile_count\":{}}}",
+                report.plan_level_counts[index].level,
+                report.plan_level_counts[index].tile_count);
+        }
+        std::string counts;
+        for (const auto& [name, value] : report.telemetry.named_counts) {
+            if (!counts.empty()) {
+                counts.push_back(',');
+            }
+            counts += fmt::format("{}:{}", json_string(name), value);
+        }
+        std::string timings;
+        for (const auto& [name, value] : report.telemetry.categorized_seconds) {
+            if (!timings.empty()) {
+                timings.push_back(',');
+            }
+            timings += fmt::format("{}:{:.17g}", json_string(name), value);
+        }
+        const std::string database_hash = report.database_content_hash
+            ? json_string(report.database_content_hash->to_hex())
+            : "null";
+        const std::string error = report.error
+            ? format_error_json(*report.error)
+            : "null";
         return fmt::format(
-            "{{\"benchmark_schema\":\"lunar-terrain-m7-v1\","
+            "{{\"benchmark_schema\":{},\"status\":{},\"run_id\":{},\"active_phase\":{},"
+            "\"resumed\":{},\"prototype_tiles\":[{}],\"level_counts\":[{}],"
             "\"build_configuration\":{},\"builder_configuration_sha256\":{},"
+            "\"database_content_sha256\":{},\"ordered_pack_sha256\":[{}],"
             "\"built_tile_count\":{},\"compiler\":{},"
-            "\"catalog_seconds\":{:.17g},\"clean_build_seconds\":{:.17g},"
+            "\"catalog_seconds\":{:.17g},\"scan_seconds\":{:.17g},"
+            "\"plan_seconds\":{:.17g},\"clean_build_seconds\":{:.17g},"
             "\"compression_ratio\":{:.17g},\"deterministic_rebuild\":{},"
             "\"host_platform\":{},"
             "\"incremental_build_seconds\":{:.17g},\"incremental_reuse_ratio\":{:.17g},"
             "\"pack_count\":{},\"peak_resident_memory_bytes\":{},\"planned_tile_count\":{},"
             "\"reused_tile_count\":{},\"sampled_core_vertices\":{},"
+            "\"requested_source_samples\":{},\"requested_halo_samples\":{},"
             "\"sampling_throughput_samples_per_second\":{:.17g},"
             "\"staging_io_bytes\":{},\"staging_io_mebibytes_per_second\":{:.17g},"
             "\"stored_pack_bytes\":{},\"uncompressed_channel_bytes\":{},"
-            "\"validation_seconds\":{:.17g},\"worker_threads\":{}}}\n",
+            "\"validation_seconds\":{:.17g},\"worker_threads\":{},"
+            "\"phase_complete\":{{\"scan\":{},\"plan\":{},\"clean_build\":{},"
+            "\"validation\":{},\"incremental_build\":{}}},"
+            "\"budgets\":{{\"managed_memory_bytes\":{},\"decoded_cache_bytes\":{},"
+            "\"transient_scratch_bytes\":{}}},"
+            "\"resources\":{{\"rss_bytes\":{},\"peak_rss_bytes\":{},"
+            "\"commit_bytes\":{},\"page_faults\":{},\"io_read_bytes\":{},"
+            "\"io_write_bytes\":{},\"decoded_cache_live_bytes\":{},"
+            "\"decoded_cache_hits\":{},\"decoded_cache_misses\":{},"
+            "\"decoded_cache_evictions\":{},\"staging_live_bytes\":{},"
+            "\"staging_cumulative_bytes\":{},\"staging_high_water_bytes\":{}}},"
+            "\"counts\":{{{}}},\"timings_seconds\":{{{}}},\"error\":{}}}\n",
+            json_string(report.benchmark_schema),
+            json_string(report.status),
+            json_string(report.run_id),
+            json_string(report.active_phase),
+            report.resumed,
+            prototype_tiles,
+            level_counts,
             json_string(report.build_configuration),
             json_string(report.builder_configuration_hash.to_hex()),
+            database_hash,
+            pack_hashes,
             report.built_tile_count,
             json_string(report.compiler),
             report.catalog_seconds,
+            report.scan_seconds,
+            report.plan_seconds,
             report.clean_build_seconds,
             report.compression_ratio,
             report.deterministic_rebuild,
@@ -530,21 +733,49 @@ std::string format_report(const BenchmarkReport& report, const bool json) {
             report.planned_tile_count,
             report.reused_tile_count,
             report.sampled_core_vertices,
+            report.requested_source_samples,
+            report.requested_halo_samples,
             report.sampling_throughput_samples_per_second,
             report.staging_io_bytes,
             report.staging_io_mebibytes_per_second,
             report.stored_pack_bytes,
             report.uncompressed_channel_bytes,
             report.validation_seconds,
-            report.worker_threads);
+            report.worker_threads,
+            report.scan_complete,
+            report.plan_complete,
+            report.clean_build_complete,
+            report.validation_complete,
+            report.incremental_build_complete,
+            report.budgets.managed_memory_bytes,
+            report.budgets.decoded_cache_bytes,
+            report.budgets.transient_scratch_bytes,
+            report.telemetry.resident_memory_bytes,
+            report.telemetry.peak_resident_memory_bytes,
+            report.telemetry.committed_memory_bytes,
+            report.telemetry.page_faults,
+            report.telemetry.io_read_bytes,
+            report.telemetry.io_write_bytes,
+            report.telemetry.decoded_cache_live_bytes,
+            report.telemetry.decoded_cache_hits,
+            report.telemetry.decoded_cache_misses,
+            report.telemetry.decoded_cache_evictions,
+            report.telemetry.staging_live_bytes,
+            report.telemetry.staging_cumulative_bytes,
+            report.telemetry.staging_high_water_bytes,
+            counts,
+            timings,
+            error);
     }
     return fmt::format(
-        "benchmark schema: lunar-terrain-m7-v1\nplatform/compiler/build: {} / {} / {}\n"
+        "benchmark schema/status: {} / {}\nplatform/compiler/build: {} / {} / {}\n"
         "workers: {}\nconfiguration sha256: {}\n"
         "catalog: {:.6f} s\nclean build: {:.6f} s\nsampling throughput: {:.3f} samples/s\n"
         "staging I/O: {} bytes ({:.3f} MiB/s)\npeak resident memory: {} bytes\n"
         "compression ratio: {:.6f}\npacks: {}\nvalidation: {:.6f} s\n"
         "incremental: {:.6f} s\nreuse: {}/{} ({:.3f}%)\ndeterministic rebuild: {}\n",
+        report.benchmark_schema,
+        report.status,
         report.host_platform,
         report.compiler,
         report.build_configuration,
@@ -569,21 +800,8 @@ std::string format_report(const BenchmarkReport& report, const bool json) {
 Result<void> write_benchmark_report(
     const BenchmarkReport& report,
     const std::filesystem::path& output_path) {
-    std::ofstream stream(output_path, std::ios::binary | std::ios::trunc);
-    if (!stream.is_open()) {
-        return Result<void>::failure(
-            Error{ErrorCode::io_error, "could not create benchmark report"}
-                .with_path(output_path.string()));
-    }
     const std::string text = format_report(report, true);
-    stream.write(text.data(), static_cast<std::streamsize>(text.size()));
-    stream.close();
-    if (!stream) {
-        return Result<void>::failure(
-            Error{ErrorCode::io_error, "could not write benchmark report"}
-                .with_path(output_path.string()));
-    }
-    return Result<void>::success();
+    return write_text_file_atomically(output_path, text);
 }
 
 }  // namespace lunar::terrain::builder

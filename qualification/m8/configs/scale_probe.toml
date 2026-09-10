@@ -1,5 +1,5 @@
 [database]
-name = "M8Scale"
+name = "M8ScaleProbe"
 format_major = 1
 format_minor = 0
 
@@ -22,6 +22,12 @@ materialize_hierarchy = true
 target_pack_bytes = 1073741824
 codec = "zstd"
 codec_level = 3
+
+[region]
+west_longitude_degrees = 40.0
+east_longitude_degrees = 50.0
+south_latitude_degrees = 10.0
+north_latitude_degrees = 20.0
 
 [[raster]]
 stable_key = "nasa.lro.lola.gdr.ldem256.v3_0.lro_es_52"

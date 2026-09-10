@@ -56,9 +56,9 @@ struct FinalizedElevationTile {
     const std::filesystem::path& staging_directory,
     std::span<const double> samples);
 
-// Builds same-level adjacency from the supplied keys, collects deterministic
-// edge and corner patches, sorts them, and applies them once per receiver. The
-// lowest encoded TileKey owns every shared boundary value.
+// Builds independent same-level adjacency from the supplied keys, collects
+// deterministic edge and corner patches, sorts them, and applies them once per
+// receiver. The lowest encoded TileKey owns every shared boundary value.
 [[nodiscard]] Result<void> resolve_elevation_boundaries(
     std::span<StagedElevationTile> tiles);
 
@@ -68,5 +68,11 @@ struct FinalizedElevationTile {
 [[nodiscard]] Result<std::vector<FinalizedElevationTile>> finalize_elevation_tiles(
     std::span<const StagedElevationTile> tiles,
     const ElevationSampler& sampler);
+
+// Variant for heterogeneous raster builds whose virtual-apron sampler depends
+// on the tile's already-fused halo. The sampler span is parallel to tiles.
+[[nodiscard]] Result<std::vector<FinalizedElevationTile>> finalize_elevation_tiles(
+    std::span<const StagedElevationTile> tiles,
+    std::span<const ElevationSampler> samplers);
 
 }  // namespace lunar::terrain::builder

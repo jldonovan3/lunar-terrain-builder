@@ -16,6 +16,7 @@
 
 #include "builder/configuration.hpp"
 #include "builder/raster_source.hpp"
+#include "builder/telemetry.hpp"
 
 namespace lunar::terrain::builder {
 
@@ -98,6 +99,11 @@ struct BuildReport {
 struct BuildOptions {
     bool incremental{};
     std::stop_token cancellation;
+    ExecutionOptions execution;
+
+    [[nodiscard]] std::stop_token cancellation_token() const noexcept {
+        return execution.cancellation.stop_possible() ? execution.cancellation : cancellation;
+    }
 };
 
 struct ValidationReport {
@@ -167,12 +173,24 @@ enum class DiagnosticExportFormat : std::uint8_t {
 };
 
 struct BenchmarkReport {
+    std::string benchmark_schema{"lunar-terrain-benchmark-v2"};
+    std::string status{"running"};
+    std::string run_id;
+    std::string active_phase{"starting"};
     std::string host_platform;
     std::string compiler;
     std::string build_configuration;
     std::uint32_t worker_threads{};
     Sha256Digest builder_configuration_hash;
+    std::optional<Sha256Digest> database_content_hash;
+    std::vector<Sha256Digest> ordered_pack_hashes;
+    std::vector<LunarTileKey> representative_tiles;
+    std::vector<PlanLevelCount> plan_level_counts;
+    ResourceBudgets budgets;
+    TelemetrySnapshot telemetry;
     std::uint64_t planned_tile_count{};
+    std::uint64_t requested_source_samples{};
+    std::uint64_t requested_halo_samples{};
     std::uint64_t sampled_core_vertices{};
     std::uint64_t staging_io_bytes{};
     std::uint64_t peak_resident_memory_bytes{};
@@ -182,6 +200,8 @@ struct BenchmarkReport {
     std::uint64_t built_tile_count{};
     std::uint64_t reused_tile_count{};
     double catalog_seconds{};
+    double scan_seconds{};
+    double plan_seconds{};
     double clean_build_seconds{};
     double sampling_throughput_samples_per_second{};
     double staging_io_mebibytes_per_second{};
@@ -190,11 +210,22 @@ struct BenchmarkReport {
     double incremental_build_seconds{};
     double incremental_reuse_ratio{};
     bool deterministic_rebuild{};
+    bool scan_complete{};
+    bool plan_complete{};
+    bool clean_build_complete{};
+    bool validation_complete{};
+    bool incremental_build_complete{};
+    bool resumed{};
+    std::optional<Error> error;
 };
 
 [[nodiscard]] std::string_view version_string() noexcept;
-[[nodiscard]] Result<ScanReport> scan_configuration(const BuilderConfiguration& configuration);
-[[nodiscard]] Result<PlanReport> plan_configuration(const BuilderConfiguration& configuration);
+[[nodiscard]] Result<ScanReport> scan_configuration(
+    const BuilderConfiguration& configuration,
+    const ExecutionOptions& options = {});
+[[nodiscard]] Result<PlanReport> plan_configuration(
+    const BuilderConfiguration& configuration,
+    const ExecutionOptions& options = {});
 [[nodiscard]] Result<BuildReport> build_configuration(
     const BuilderConfiguration& configuration,
     BuildOptions options = {});
@@ -207,25 +238,31 @@ struct BenchmarkReport {
     BuildOptions options = {});
 [[nodiscard]] Result<ValidationReport> validate_database(
     const std::filesystem::path& path,
-    bool full);
+    bool full,
+    const ExecutionOptions& options = {});
 [[nodiscard]] Result<InspectionReport> inspect_database(
     const std::filesystem::path& path,
-    std::optional<LunarTileKey> key);
+    std::optional<LunarTileKey> key,
+    const ExecutionOptions& options = {});
 [[nodiscard]] Result<DiffReport> diff_databases(
     const std::filesystem::path& before_path,
-    const std::filesystem::path& after_path);
+    const std::filesystem::path& after_path,
+    const ExecutionOptions& options = {});
 [[nodiscard]] Result<void> export_tile(
     const std::filesystem::path& database_path,
     LunarTileKey key,
     DiagnosticExportFormat format,
-    const std::filesystem::path& output_path);
+    const std::filesystem::path& output_path,
+    const ExecutionOptions& options = {});
 [[nodiscard]] Result<void> export_tile_diagnostic(
     const std::filesystem::path& database_path,
     LunarTileKey key,
     DiagnosticExportFormat format,
-    const std::filesystem::path& output_path);
+    const std::filesystem::path& output_path,
+    const ExecutionOptions& options = {});
 [[nodiscard]] Result<BenchmarkReport> benchmark_configuration(
-    const BuilderConfiguration& configuration);
+    const BuilderConfiguration& configuration,
+    const ExecutionOptions& options = {});
 [[nodiscard]] Result<void> write_benchmark_report(
     const BenchmarkReport& report,
     const std::filesystem::path& output_path);

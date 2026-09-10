@@ -16,7 +16,7 @@ import stat
 import struct
 import sys
 import time
-from typing import Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
+from typing import Callable, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote, urljoin, urlparse
 from urllib.request import Request, urlopen
@@ -34,6 +34,69 @@ class ProvisioningError(Exception):
 
 class _RetryableDownloadError(Exception):
     pass
+
+
+class ProgressReporter:
+    """Emit per-member and periodic byte/rate progress to stderr."""
+
+    def __init__(
+        self,
+        interval_seconds: float = 5.0,
+        stream: object = sys.stderr,
+        clock: Callable[[], float] = time.monotonic,
+    ) -> None:
+        if interval_seconds <= 0:
+            raise ProvisioningError("progress interval must be positive")
+        self.interval_seconds = interval_seconds
+        self.stream = stream
+        self.clock = clock
+        self.operation = "idle"
+        self.member = ""
+        self.completed_bytes = 0
+        self.total_bytes: Optional[int] = None
+        self.started = self.clock()
+        self.last_report = self.started
+
+    def begin(
+        self,
+        operation: str,
+        member: str,
+        total_bytes: Optional[int],
+        completed_bytes: int = 0,
+    ) -> None:
+        self.operation = operation
+        self.member = member
+        self.completed_bytes = completed_bytes
+        self.total_bytes = total_bytes
+        self.started = self.clock()
+        self.last_report = self.started
+        self._emit("starting")
+
+    def set_total(self, total_bytes: Optional[int]) -> None:
+        self.total_bytes = total_bytes
+
+    def advance(self, byte_count: int) -> None:
+        self.completed_bytes += byte_count
+        now = self.clock()
+        if now - self.last_report >= self.interval_seconds:
+            self._emit("running", now)
+
+    def finish(self, state: str = "completed") -> None:
+        self._emit(state)
+
+    def _emit(self, state: str, now: Optional[float] = None) -> None:
+        current = self.clock() if now is None else now
+        elapsed = max(current - self.started, 1.0e-9)
+        total = "unknown" if self.total_bytes is None else str(self.total_bytes)
+        rate = 0.0 if state == "starting" else self.completed_bytes / elapsed
+        print(
+            f"[provision] operation={self.operation} member={self.member!r} "
+            f"state={state} bytes={self.completed_bytes}/{total} "
+            f"rate_bytes_per_second={rate:.3f}",
+            file=self.stream,
+            flush=True,
+        )
+        self.last_report = current
 
 
 @dataclass(frozen=True)
@@ -556,7 +619,12 @@ def _retry_delay(attempt: int) -> int:
     return min(2**attempt, 10)
 
 
-def _copy_response(response: object, stream: object, chunk_bytes: int) -> int:
+def _copy_response(
+    response: object,
+    stream: object,
+    chunk_bytes: int,
+    progress: Optional[ProgressReporter] = None,
+) -> int:
     copied = 0
     while True:
         chunk = response.read(chunk_bytes)
@@ -564,6 +632,8 @@ def _copy_response(response: object, stream: object, chunk_bytes: int) -> int:
             break
         stream.write(chunk)
         copied += len(chunk)
+        if progress is not None:
+            progress.advance(len(chunk))
     content_length_text = response.headers.get("Content-Length")
     if content_length_text is not None:
         try:
@@ -577,8 +647,19 @@ def _copy_response(response: object, stream: object, chunk_bytes: int) -> int:
     return copied
 
 
-def download_file(url: str, target: Path, network: NetworkSpec) -> None:
+def download_file(
+    url: str,
+    target: Path,
+    network: NetworkSpec,
+    progress: Optional[ProgressReporter] = None,
+    member_name: Optional[str] = None,
+) -> None:
+    reporter = progress or ProgressReporter()
+    member = member_name or target.name
     if target.is_file():
+        size = target.stat().st_size
+        reporter.begin("download", member, size, size)
+        reporter.finish("already-present")
         return
     if target.exists():
         raise ProvisioningError(f"download target exists but is not a regular file: {target}")
@@ -592,7 +673,8 @@ def download_file(url: str, target: Path, network: NetworkSpec) -> None:
     for attempt in range(network.retry_count + 1):
         offset = partial.stat().st_size if partial.exists() else 0
         action = "Resuming" if offset else "Downloading"
-        print(f"{action} {url} -> {target}")
+        reporter.begin("download", member, None, offset)
+        print(f"{action} {url} -> {target}", file=sys.stderr, flush=True)
         headers = {"User-Agent": network.user_agent}
         if offset:
             headers["Range"] = f"bytes={offset}-"
@@ -614,12 +696,20 @@ def download_file(url: str, target: Path, network: NetworkSpec) -> None:
                 elif status != 200:
                     raise ProvisioningError(f"unexpected HTTP status {status} for {url}")
 
+                content_length_text = response.headers.get("Content-Length")
+                if content_length_text is not None:
+                    try:
+                        reporter.set_total(offset + int(content_length_text))
+                    except ValueError:
+                        pass
+
                 mode = "ab" if offset else "wb"
                 with partial.open(mode) as stream:
-                    _copy_response(response, stream, network.chunk_bytes)
+                    _copy_response(response, stream, network.chunk_bytes, reporter)
                     stream.flush()
                     os.fsync(stream.fileno())
             os.replace(partial, target)
+            reporter.finish()
             return
         except ProvisioningError:
             raise
@@ -631,6 +721,7 @@ def download_file(url: str, target: Path, network: NetworkSpec) -> None:
             last_error = error
 
         if attempt < network.retry_count:
+            reporter.finish("retrying")
             time.sleep(_retry_delay(attempt))
 
     detail = f": {last_error}" if last_error is not None else ""
@@ -644,17 +735,24 @@ def _file_digest(
     algorithm: str,
     cache: Dict[Tuple[Path, str], str],
     chunk_bytes: int,
+    progress: Optional[ProgressReporter] = None,
+    member_name: Optional[str] = None,
 ) -> str:
     key = (path, algorithm)
     cached = cache.get(key)
     if cached is not None:
         return cached
+    reporter = progress or ProgressReporter()
+    size = path.stat().st_size
+    reporter.begin(f"hash-{algorithm}", member_name or path.name, size)
     digest = hashlib.new(algorithm, usedforsecurity=False)
     with path.open("rb") as stream:
         for chunk in iter(lambda: stream.read(chunk_bytes), b""):
             digest.update(chunk)
+            reporter.advance(len(chunk))
     result = digest.hexdigest()
     cache[key] = result
+    reporter.finish()
     return result
 
 
@@ -702,6 +800,7 @@ def load_upstream_checksums(
     network: NetworkSpec,
     verify_only: bool,
     digest_cache: Dict[Tuple[Path, str], str],
+    progress: Optional[ProgressReporter] = None,
 ) -> Mapping[str, str]:
     spec = product.checksum_manifests[manifest_name]
     path = _rooted_path(root, spec.path)
@@ -710,9 +809,10 @@ def load_upstream_checksums(
             raise ProvisioningError(
                 f"missing checksum manifest in --verify-only mode: {path}"
             )
-        download_file(spec.url, path, network)
+        download_file(spec.url, path, network, progress, spec.path)
     if spec.sha256 is not None:
-        actual = _file_digest(path, "sha256", digest_cache, network.chunk_bytes)
+        actual = _file_digest(
+            path, "sha256", digest_cache, network.chunk_bytes, progress, spec.path)
         if actual != spec.sha256:
             raise ProvisioningError(
                 f"SHA-256 mismatch for checksum manifest {path}: expected {spec.sha256}, got {actual}. "
@@ -744,6 +844,7 @@ def verify_bundle(
     upstream_checksums: Optional[Mapping[str, str]],
     digest_cache: Dict[Tuple[Path, str], str],
     chunk_bytes: int,
+    progress: Optional[ProgressReporter] = None,
 ) -> BundleVerification:
     total_bytes = 0
     sha256_by_member: Dict[str, str] = {}
@@ -754,6 +855,8 @@ def verify_bundle(
         if not path.is_file():
             raise ProvisioningError(f"missing artifact member: {path}")
         actual_bytes = path.stat().st_size
+        reporter = progress or ProgressReporter()
+        reporter.begin("verify-member", relative_path, actual_bytes)
         metadata = product.members.get(relative_path)
         if metadata is not None and metadata.bytes is not None and actual_bytes != metadata.bytes:
             raise ProvisioningError(
@@ -768,7 +871,8 @@ def verify_bundle(
                 f"no official MD5 found for {relative_path} in the configured checksum manifest"
             )
         if expected_md5 is not None or manifest_md5 is not None:
-            actual_md5 = _file_digest(path, "md5", digest_cache, chunk_bytes)
+            actual_md5 = _file_digest(
+                path, "md5", digest_cache, chunk_bytes, reporter, relative_path)
             for source, expected in (("configured", expected_md5), ("official", manifest_md5)):
                 if expected is not None and actual_md5 != expected:
                     raise ProvisioningError(
@@ -778,7 +882,8 @@ def verify_bundle(
 
         expected_sha256 = metadata.sha256 if metadata is not None else None
         if need_all_sha256 or expected_sha256 is not None:
-            actual_sha256 = _file_digest(path, "sha256", digest_cache, chunk_bytes)
+            actual_sha256 = _file_digest(
+                path, "sha256", digest_cache, chunk_bytes, reporter, relative_path)
             sha256_by_member[relative_path] = actual_sha256
             if expected_sha256 is not None and actual_sha256 != expected_sha256:
                 raise ProvisioningError(
@@ -786,6 +891,8 @@ def verify_bundle(
                     "Make the file writable if needed, delete only this file, and re-run."
                 )
         total_bytes += actual_bytes
+        reporter.begin("verify-member", relative_path, actual_bytes, actual_bytes)
+        reporter.finish()
 
     if total_bytes != bundle.total_bytes:
         raise ProvisioningError(
@@ -811,10 +918,20 @@ def verify_bundle(
 def write_sha256_manifest(root: Path, relative_path: str, digests: Mapping[str, str]) -> Path:
     path = _rooted_path(root, relative_path)
     path.parent.mkdir(parents=True, exist_ok=True)
+    contents = "".join(
+        f"{digests[member_path]}  {member_path}\n"
+        for member_path in sorted(digests)
+    )
+    try:
+        if path.read_text(encoding="ascii") == contents:
+            return path
+    except FileNotFoundError:
+        pass
+    except UnicodeDecodeError as error:
+        raise ProvisioningError(f"existing SHA-256 manifest is not ASCII text: {path}") from error
     partial = Path(f"{path}.part")
     with partial.open("w", encoding="ascii", newline="\n") as stream:
-        for member_path in sorted(digests):
-            stream.write(f"{digests[member_path]}  {member_path}\n")
+        stream.write(contents)
         stream.flush()
         os.fsync(stream.fileno())
     os.replace(partial, path)
@@ -833,7 +950,9 @@ def make_members_read_only(root: Path, members: Sequence[str]) -> None:
     write_bits = stat.S_IWUSR | stat.S_IWGRP | stat.S_IWOTH
     for relative_path in members:
         path = _rooted_path(root, relative_path)
-        path.chmod(path.stat().st_mode & ~write_bits)
+        current_mode = path.stat().st_mode
+        if current_mode & write_bits:
+            path.chmod(current_mode & ~write_bits)
 
 
 def run_profile(
@@ -841,7 +960,9 @@ def run_profile(
     profile: ProfileSpec,
     root: Path,
     verify_only: bool,
+    progress: Optional[ProgressReporter] = None,
 ) -> None:
+    reporter = progress or ProgressReporter()
     product = config.products[profile.product]
     download_bundle = product.bundles[profile.download_bundle]
     if verify_only:
@@ -855,7 +976,7 @@ def run_profile(
             source_url = metadata.url if metadata is not None and metadata.url is not None else None
             if source_url is None:
                 source_url = _download_url(product.download_base_url, relative_path)
-            download_file(source_url, target, config.network)
+            download_file(source_url, target, config.network, reporter, relative_path)
 
     digest_cache: Dict[Tuple[Path, str], str] = {}
     upstream_by_manifest: Dict[str, Mapping[str, str]] = {}
@@ -873,10 +994,17 @@ def run_profile(
                     config.network,
                     verify_only,
                     digest_cache,
+                    reporter,
                 )
             upstream = upstream_by_manifest[manifest_name]
         results[bundle_name] = verify_bundle(
-            product, bundle, root, upstream, digest_cache, config.network.chunk_bytes
+            product,
+            bundle,
+            root,
+            upstream,
+            digest_cache,
+            config.network.chunk_bytes,
+            reporter,
         )
 
     result = results[download_bundle.name]
@@ -919,6 +1047,13 @@ def _argument_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="verify existing files without making any network requests",
     )
+    parser.add_argument(
+        "--progress-interval-seconds",
+        type=float,
+        default=5.0,
+        metavar="SECONDS",
+        help="periodic byte/rate progress interval (default: 5)",
+    )
     return parser
 
 
@@ -926,6 +1061,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     parser = _argument_parser()
     arguments = parser.parse_args(argv)
     try:
+        if arguments.progress_interval_seconds <= 0:
+            raise ProvisioningError("--progress-interval-seconds must be positive")
         config = load_config(arguments.config.resolve(strict=False))
         profile = resolve_profile(config, arguments.profile)
         product = config.products[profile.product]
@@ -937,7 +1074,13 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 f"--root or {product.root_environment} must name the external {product.display_name} root"
             )
         root = resolve_root(str(root_value))
-        run_profile(config, profile, root, arguments.verify_only)
+        run_profile(
+            config,
+            profile,
+            root,
+            arguments.verify_only,
+            ProgressReporter(arguments.progress_interval_seconds),
+        )
         return 0
     except ProvisioningError as error:
         print(f"error: {error}", file=sys.stderr)

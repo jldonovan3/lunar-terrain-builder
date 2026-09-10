@@ -160,9 +160,15 @@ template <std::size_t Size>
 
 [[nodiscard]] Result<std::vector<std::pair<TileIndexEntry, DecodedTerrainTile>>> read_all_tiles(
     LunarTerrainDatabase& database,
-    const std::filesystem::path& path) {
+    const std::filesystem::path& path,
+    const ExecutionOptions& options) {
     std::vector<TileIndexEntry> entries;
     for (std::uint8_t face = 0; face < 6; ++face) {
+        auto checked = check_execution(options);
+        if (!checked) {
+            return Result<std::vector<std::pair<TileIndexEntry, DecodedTerrainTile>>>::failure(
+                std::move(checked).error());
+        }
         auto root = LunarTileKey::create(face, 0, 0, 0);
         if (!root) {
             return Result<std::vector<std::pair<TileIndexEntry, DecodedTerrainTile>>>::failure(
@@ -179,13 +185,23 @@ template <std::size_t Size>
 
     std::vector<std::pair<TileIndexEntry, DecodedTerrainTile>> tiles;
     tiles.reserve(entries.size());
-    for (const TileIndexEntry& entry : entries) {
+    for (std::size_t index = 0; index < entries.size(); ++index) {
+        auto checked = check_execution(options);
+        if (!checked) {
+            return Result<std::vector<std::pair<TileIndexEntry, DecodedTerrainTile>>>::failure(
+                std::move(checked).error());
+        }
+        const TileIndexEntry& entry = entries[index];
         auto decoded = database.ReadTile(entry.key);
         if (!decoded) {
             return Result<std::vector<std::pair<TileIndexEntry, DecodedTerrainTile>>>::failure(
                 std::move(decoded).error());
         }
         tiles.emplace_back(entry, std::move(decoded).value());
+        if (options.telemetry != nullptr) {
+            options.telemetry->SetWork(index + 1U, entries.size());
+            options.telemetry->AddCount("validation_decoded_tiles");
+        }
     }
     return Result<std::vector<std::pair<TileIndexEntry, DecodedTerrainTile>>>::success(
         std::move(tiles));
@@ -193,15 +209,24 @@ template <std::size_t Size>
 
 [[nodiscard]] Result<std::uint64_t> validate_seams(
     const std::vector<std::pair<TileIndexEntry, DecodedTerrainTile>>& tiles,
-    const std::filesystem::path& path) {
+    const std::filesystem::path& path,
+    const ExecutionOptions& options) {
     std::map<std::uint64_t, const DecodedTerrainTile*> by_key;
     for (const auto& [entry, tile] : tiles) {
+        auto checked = check_execution(options);
+        if (!checked) {
+            return Result<std::uint64_t>::failure(std::move(checked).error());
+        }
         by_key.emplace(entry.key.encoded(), &tile);
     }
 
     constexpr std::array edges{QscEdge::west, QscEdge::east, QscEdge::south, QscEdge::north};
     std::uint64_t verified = 0;
     for (const auto& [entry, tile] : tiles) {
+        auto checked = check_execution(options);
+        if (!checked) {
+            return Result<std::uint64_t>::failure(std::move(checked).error());
+        }
         const DecodedChannel* source = elevation_channel(tile);
         if (source == nullptr) {
             return Result<std::uint64_t>::failure(
@@ -243,13 +268,22 @@ template <std::size_t Size>
 
 [[nodiscard]] Result<void> validate_hierarchy(
     const std::vector<std::pair<TileIndexEntry, DecodedTerrainTile>>& tiles,
-    const std::filesystem::path& path) {
+    const std::filesystem::path& path,
+    const ExecutionOptions& options) {
     std::map<std::uint64_t, const TileIndexEntry*> by_key;
     for (const auto& [entry, unused_tile] : tiles) {
+        auto checked = check_execution(options);
+        if (!checked) {
+            return checked;
+        }
         static_cast<void>(unused_tile);
         by_key.emplace(entry.key.encoded(), &entry);
     }
     for (const auto& [entry, unused_tile] : tiles) {
+        auto checked = check_execution(options);
+        if (!checked) {
+            return checked;
+        }
         static_cast<void>(unused_tile);
         std::uint8_t expected_mask = 0;
         auto children = entry.key.children();
@@ -280,7 +314,8 @@ template <std::size_t Size>
 }
 
 [[nodiscard]] Result<std::uint64_t> validate_projection(
-    const std::filesystem::path& path) {
+    const std::filesystem::path& path,
+    const ExecutionOptions& options) {
     constexpr std::array samples{
         std::array{-0.875, -0.625},
         std::array{-0.5, 0.25},
@@ -290,6 +325,10 @@ template <std::size_t Size>
     };
     std::uint64_t verified = 0;
     for (std::uint8_t face = 0; face < 6; ++face) {
+        auto checked = check_execution(options);
+        if (!checked) {
+            return Result<std::uint64_t>::failure(std::move(checked).error());
+        }
         for (const auto& sample : samples) {
             const QscCoordinate qsc{
                 static_cast<QscFace>(face), sample[0], sample[1], 123.5};
@@ -322,7 +361,8 @@ struct ScientificValidationCounts {
 [[nodiscard]] Result<ScientificValidationCounts> validate_scientific_content(
     const std::vector<std::pair<TileIndexEntry, DecodedTerrainTile>>& tiles,
     const std::span<const DatasetId> datasets,
-    const std::filesystem::path& path) {
+    const std::filesystem::path& path,
+    const ExecutionOptions& options) {
     std::set<std::uint32_t> dataset_ids;
     for (const DatasetId dataset : datasets) {
         dataset_ids.insert(dataset.value);
@@ -330,6 +370,10 @@ struct ScientificValidationCounts {
 
     ScientificValidationCounts counts;
     for (const auto& [entry, tile] : tiles) {
+        auto checked = check_execution(options);
+        if (!checked) {
+            return Result<ScientificValidationCounts>::failure(std::move(checked).error());
+        }
         const DecodedChannel* elevation = elevation_channel(tile);
         const auto& metadata = tile.metadata();
         const std::size_t elevation_bytes =
@@ -400,7 +444,22 @@ std::string_view version_string() noexcept {
     return "0.3.0";
 }
 
-Result<ScanReport> scan_configuration(const BuilderConfiguration& configuration) {
+Result<ScanReport> scan_configuration(
+    const BuilderConfiguration& configuration,
+    const ExecutionOptions& options) {
+    if (options.telemetry != nullptr) {
+        options.telemetry->SetPhase(
+            "scan",
+            0,
+            configuration.source_kind == BuilderSourceKind::raster
+                ? configuration.rasters.size()
+                : 1U);
+    }
+    TelemetryActivity scan_activity{options.telemetry, "scan"};
+    auto execution = check_execution(options);
+    if (!execution) {
+        return Result<ScanReport>::failure(std::move(execution).error());
+    }
     auto identity = identify_configuration(configuration);
     if (!identity) {
         return Result<ScanReport>::failure(std::move(identity).error());
@@ -427,11 +486,25 @@ Result<ScanReport> scan_configuration(const BuilderConfiguration& configuration)
         identity.value().semantic_hash,
     };
     if (configuration.source_kind == BuilderSourceKind::raster) {
-        auto sources = open_raster_sources(configuration, identity.value());
-        if (!sources) {
-            return Result<ScanReport>::failure(std::move(sources).error());
+        std::vector<std::unique_ptr<IRasterSource>> owned_sources;
+        const std::vector<std::unique_ptr<IRasterSource>>* sources = nullptr;
+        if (options.prepared_source_catalog != nullptr) {
+            if (options.prepared_source_catalog->identity.builder_hash != identity.value().builder_hash ||
+                options.prepared_source_catalog->sources.size() != configuration.rasters.size()) {
+                return Result<ScanReport>::failure(Error{
+                    ErrorCode::invalid_argument,
+                    "prepared source catalog does not match the configuration"});
+            }
+            sources = &options.prepared_source_catalog->sources;
+        } else {
+            auto opened = open_raster_sources(configuration, identity.value(), options.telemetry);
+            if (!opened) {
+                return Result<ScanReport>::failure(std::move(opened).error());
+            }
+            owned_sources = std::move(opened).value();
+            sources = &owned_sources;
         }
-        const IRasterSource& source = *sources.value()[representative];
+        const IRasterSource& source = *(*sources)[representative];
         report.raster_details = source.details();
         report.artifact_members = source.metadata().artifact_members;
         report.artifact_bundle_bytes = source.metadata().artifact_bundle_bytes;
@@ -444,10 +517,16 @@ Result<ScanReport> scan_configuration(const BuilderConfiguration& configuration)
         }
         const double latitude = (footprint.south_latitude_degrees +
                                  footprint.north_latitude_degrees) * 0.5;
-        auto sample = source.TrySample(LunarGeodeticCoordinate{
-            latitude * std::numbers::pi_v<double> / 180.0,
-            longitude * std::numbers::pi_v<double> / 180.0,
-            0.0});
+        auto sample = [&]() {
+            TelemetryActivity activity{options.telemetry, "sampling"};
+            if (options.telemetry != nullptr) {
+                options.telemetry->AddCount("requested_source_samples");
+            }
+            return source.TrySample(LunarGeodeticCoordinate{
+                latitude * std::numbers::pi_v<double> / 180.0,
+                longitude * std::numbers::pi_v<double> / 180.0,
+                0.0});
+        }();
         if (!sample) {
             return Result<ScanReport>::failure(std::move(sample).error());
         }
@@ -465,8 +544,12 @@ Result<ScanReport> scan_configuration(const BuilderConfiguration& configuration)
         });
         report.sources.reserve(order.size());
         for (const std::size_t index : order) {
+            execution = check_execution(options);
+            if (!execution) {
+                return Result<ScanReport>::failure(std::move(execution).error());
+            }
             const RasterConfiguration& raster = configuration.rasters[index];
-            const IRasterSource& raster_source = *sources.value()[index];
+            const IRasterSource& raster_source = *(*sources)[index];
             ScanSourceReport source_report;
             source_report.dataset_id = identity.value().dataset_ids[index];
             source_report.stable_key = raster.stable_key;
@@ -491,10 +574,16 @@ Result<ScanReport> scan_configuration(const BuilderConfiguration& configuration)
             }
             const double source_latitude = (source_footprint.south_latitude_degrees +
                                             source_footprint.north_latitude_degrees) * 0.5;
-            auto center = raster_source.TrySample(LunarGeodeticCoordinate{
-                source_latitude * std::numbers::pi_v<double> / 180.0,
-                source_longitude * std::numbers::pi_v<double> / 180.0,
-                0.0});
+            auto center = [&]() {
+                TelemetryActivity activity{options.telemetry, "sampling"};
+                if (options.telemetry != nullptr) {
+                    options.telemetry->AddCount("requested_source_samples");
+                }
+                return raster_source.TrySample(LunarGeodeticCoordinate{
+                    source_latitude * std::numbers::pi_v<double> / 180.0,
+                    source_longitude * std::numbers::pi_v<double> / 180.0,
+                    0.0});
+            }();
             if (!center) {
                 return Result<ScanReport>::failure(std::move(center).error());
             }
@@ -502,28 +591,69 @@ Result<ScanReport> scan_configuration(const BuilderConfiguration& configuration)
                 source_report.center_elevation_meters = center.value()->elevation_meters;
             }
             report.sources.push_back(std::move(source_report));
+            if (options.telemetry != nullptr) {
+                options.telemetry->SetWork(report.sources.size(), order.size());
+            }
         }
         report.required_region = configuration.required_region;
+    } else if (options.telemetry != nullptr) {
+        options.telemetry->SetWork(1, 1);
     }
     return Result<ScanReport>::success(std::move(report));
 }
 
-Result<PlanReport> plan_configuration(const BuilderConfiguration& configuration) {
+Result<PlanReport> plan_configuration(
+    const BuilderConfiguration& configuration,
+    const ExecutionOptions& options) {
+    if (options.telemetry != nullptr) {
+        options.telemetry->SetPhase("plan");
+    }
+    TelemetryActivity plan_activity{options.telemetry, "plan"};
+    auto execution = check_execution(options);
+    if (!execution) {
+        return Result<PlanReport>::failure(std::move(execution).error());
+    }
     if (configuration.source_kind == BuilderSourceKind::synthetic) {
-        return plan_synthetic(configuration);
+        auto report = plan_synthetic(configuration);
+        if (report && options.telemetry != nullptr) {
+            options.telemetry->SetWork(
+                report.value().expected_hierarchy_tiles.size(),
+                report.value().expected_hierarchy_tiles.size());
+            options.telemetry->AddCount(
+                "planned_tiles", report.value().expected_hierarchy_tiles.size());
+        }
+        return report;
     }
     auto identity = identify_configuration(configuration);
     if (!identity) {
         return Result<PlanReport>::failure(std::move(identity).error());
     }
-    auto sources = open_raster_sources(configuration, identity.value());
-    if (!sources) {
-        return Result<PlanReport>::failure(std::move(sources).error());
+    std::vector<std::unique_ptr<IRasterSource>> owned_sources;
+    const std::vector<std::unique_ptr<IRasterSource>>* sources = nullptr;
+    if (options.prepared_source_catalog != nullptr) {
+        if (options.prepared_source_catalog->identity.builder_hash != identity.value().builder_hash ||
+            options.prepared_source_catalog->sources.size() != configuration.rasters.size()) {
+            return Result<PlanReport>::failure(Error{
+                ErrorCode::invalid_argument,
+                "prepared source catalog does not match the configuration"});
+        }
+        sources = &options.prepared_source_catalog->sources;
+    } else {
+        auto opened = open_raster_sources(configuration, identity.value(), options.telemetry);
+        if (!opened) {
+            return Result<PlanReport>::failure(std::move(opened).error());
+        }
+        owned_sources = std::move(opened).value();
+        sources = &owned_sources;
     }
     std::vector<HierarchySource> hierarchy_sources;
-    hierarchy_sources.reserve(sources.value().size());
-    for (std::size_t index = 0; index < sources.value().size(); ++index) {
-        GeographicFootprint footprint = sources.value()[index]->details().footprint;
+    hierarchy_sources.reserve(sources->size());
+    for (std::size_t index = 0; index < sources->size(); ++index) {
+        execution = check_execution(options);
+        if (!execution) {
+            return Result<PlanReport>::failure(std::move(execution).error());
+        }
+        GeographicFootprint footprint = (*sources)[index]->details().footprint;
         if (configuration.required_region) {
             footprint.west_longitude_degrees = std::max(
                 footprint.west_longitude_degrees,
@@ -545,14 +675,17 @@ Result<PlanReport> plan_configuration(const BuilderConfiguration& configuration)
         hierarchy_sources.push_back(HierarchySource{
             identity.value().dataset_ids[index],
             footprint,
-            sources.value()[index]->metadata().effective_resolution_meters,
+            (*sources)[index]->metadata().effective_resolution_meters,
             configuration.maximum_level});
     }
     if (hierarchy_sources.empty()) {
         return Result<PlanReport>::failure(Error{
             ErrorCode::invalid_argument, "required region does not intersect any configured source"});
     }
-    auto hierarchy = plan_sparse_hierarchy(hierarchy_sources);
+    auto hierarchy = [&]() {
+        TelemetryActivity activity{options.telemetry, "projection"};
+        return plan_sparse_hierarchy(hierarchy_sources);
+    }();
     if (!hierarchy) {
         return Result<PlanReport>::failure(std::move(hierarchy).error());
     }
@@ -588,7 +721,7 @@ Result<PlanReport> plan_configuration(const BuilderConfiguration& configuration)
         &HierarchySourceLevel::dataset_id);
     if (target_level != hierarchy_plan.source_levels.end()) {
         auto prototype = choose_raster_prototype_tile(
-            *sources.value()[target], target_level->level);
+            *(*sources)[target], target_level->level);
         if (!prototype) {
             return Result<PlanReport>::failure(std::move(prototype).error());
         }
@@ -619,17 +752,36 @@ Result<PlanReport> plan_configuration(const BuilderConfiguration& configuration)
     });
     std::map<std::uint8_t, std::uint64_t> counts;
     for (const LunarTileKey key : report.expected_hierarchy_tiles) {
+        execution = check_execution(options);
+        if (!execution) {
+            return Result<PlanReport>::failure(std::move(execution).error());
+        }
         ++counts[key.level()];
     }
     for (const auto [level, count] : counts) {
         report.level_counts.push_back(PlanLevelCount{level, count});
+    }
+    if (options.telemetry != nullptr) {
+        options.telemetry->SetWork(
+            report.expected_hierarchy_tiles.size(), report.expected_hierarchy_tiles.size());
+        options.telemetry->AddCount("planned_tiles", report.expected_hierarchy_tiles.size());
     }
     return Result<PlanReport>::success(std::move(report));
 }
 
 Result<BuildReport> build_configuration(
     const BuilderConfiguration& configuration,
-    const BuildOptions options) {
+    BuildOptions options) {
+    if (!options.execution.cancellation.stop_possible()) {
+        options.execution.cancellation = options.cancellation;
+    }
+    if (options.execution.telemetry != nullptr) {
+        options.execution.telemetry->SetPhase("build");
+    }
+    auto execution = check_execution(options.execution);
+    if (!execution) {
+        return Result<BuildReport>::failure(std::move(execution).error());
+    }
     return configuration.source_kind == BuilderSourceKind::synthetic
         ? build_synthetic(configuration, options)
         : build_raster_source(configuration, options);
@@ -663,12 +815,25 @@ Result<PlanReport> plan_synthetic(const BuilderConfiguration& configuration) {
 
 Result<ValidationReport> validate_database(
     const std::filesystem::path& path,
-    const bool full) {
+    const bool full,
+    const ExecutionOptions& options) {
+    if (options.telemetry != nullptr) {
+        options.telemetry->SetPhase("validation_open");
+    }
+    TelemetryActivity validation_activity{options.telemetry, "validation"};
+    auto execution = check_execution(options);
+    if (!execution) {
+        return Result<ValidationReport>::failure(std::move(execution).error());
+    }
     auto database = LunarTerrainDatabase::Open(path);
     if (!database) {
         return Result<ValidationReport>::failure(std::move(database).error());
     }
-    auto tiles = read_all_tiles(database.value(), path);
+    if (options.telemetry != nullptr) {
+        options.telemetry->SetPhase(
+            "validation_decode", 0, database.value().Header().tile_count);
+    }
+    auto tiles = read_all_tiles(database.value(), path, options);
     if (!tiles) {
         return Result<ValidationReport>::failure(std::move(tiles).error());
     }
@@ -678,24 +843,42 @@ Result<ValidationReport> validate_database(
     std::uint64_t hierarchy_tiles = 0;
     std::uint64_t seams = 0;
     if (full) {
-        auto projection = validate_projection(path);
+        if (options.telemetry != nullptr) {
+            options.telemetry->SetPhase("validation_projection");
+        }
+        auto projection = [&]() {
+            TelemetryActivity projection_activity{options.telemetry, "projection"};
+            return validate_projection(path, options);
+        }();
         if (!projection) {
             return Result<ValidationReport>::failure(std::move(projection).error());
         }
         projection_samples = projection.value();
         const std::vector<DatasetId> datasets = database.value().DatasetIds();
-        auto scientific = validate_scientific_content(tiles.value(), datasets, path);
+        if (options.telemetry != nullptr) {
+            options.telemetry->SetPhase(
+                "validation_scientific", 0, tiles.value().size());
+        }
+        auto scientific = validate_scientific_content(tiles.value(), datasets, path, options);
         if (!scientific) {
             return Result<ValidationReport>::failure(std::move(scientific).error());
         }
         scientific_tiles = scientific.value().scientific_tiles;
         provenance_tiles = scientific.value().provenance_tiles;
-        auto hierarchy = validate_hierarchy(tiles.value(), path);
+        if (options.telemetry != nullptr) {
+            options.telemetry->SetPhase(
+                "validation_hierarchy", 0, tiles.value().size());
+        }
+        auto hierarchy = validate_hierarchy(tiles.value(), path, options);
         if (!hierarchy) {
             return Result<ValidationReport>::failure(std::move(hierarchy).error());
         }
         hierarchy_tiles = tiles.value().size();
-        auto validated = validate_seams(tiles.value(), path);
+        if (options.telemetry != nullptr) {
+            options.telemetry->SetPhase("validation_seams", 0, tiles.value().size());
+        }
+        TelemetryActivity seam_activity{options.telemetry, "seam_resolution"};
+        auto validated = validate_seams(tiles.value(), path, options);
         if (!validated) {
             return Result<ValidationReport>::failure(std::move(validated).error());
         }
@@ -716,7 +899,16 @@ Result<ValidationReport> validate_database(
 
 Result<InspectionReport> inspect_database(
     const std::filesystem::path& path,
-    const std::optional<LunarTileKey> key) {
+    const std::optional<LunarTileKey> key,
+    const ExecutionOptions& options) {
+    if (options.telemetry != nullptr) {
+        options.telemetry->SetPhase("inspection");
+    }
+    TelemetryActivity inspection_activity{options.telemetry, "inspection"};
+    auto execution = check_execution(options);
+    if (!execution) {
+        return Result<InspectionReport>::failure(std::move(execution).error());
+    }
     auto database = LunarTerrainDatabase::Open(path);
     if (!database) {
         return Result<InspectionReport>::failure(std::move(database).error());
@@ -946,6 +1138,13 @@ std::string format_report(const PlanReport& report, const bool json) {
             }
             tiles += json_string(report.expected_hierarchy_tiles[index].to_string());
         }
+        std::string prototype_tiles;
+        for (std::size_t index = 0; index < report.tiles.size(); ++index) {
+            if (index != 0) {
+                prototype_tiles.push_back(',');
+            }
+            prototype_tiles += json_string(report.tiles[index].to_string());
+        }
         std::string sources;
         for (std::size_t index = 0; index < report.sources.size(); ++index) {
             if (index != 0) {
@@ -976,11 +1175,13 @@ std::string format_report(const PlanReport& report, const bool json) {
         }
         return fmt::format(
             "{{\"estimated_uncompressed_channel_bytes\":{},\"level_counts\":[{}],"
-            "\"prototype_tile_count\":{},\"required_region_degrees\":{},\"sources\":[{}],"
+            "\"prototype_tile_count\":{},\"prototype_tiles\":[{}],"
+            "\"required_region_degrees\":{},\"sources\":[{}],"
             "\"tile_count\":{},\"tiles\":[{}],\"tiles_omitted\":{}}}\n",
             report.estimated_uncompressed_channel_bytes,
             levels,
             report.tiles.size(),
+            prototype_tiles,
             report.required_region ? bounds_json(*report.required_region) : "null",
             sources,
             report.expected_hierarchy_tiles.size(),
@@ -1017,6 +1218,10 @@ std::string format_report(const PlanReport& report, const bool json) {
     text += "hierarchy counts:\n";
     for (const PlanLevelCount count : report.level_counts) {
         text += fmt::format("  L{}: {}\n", count.level, count.tile_count);
+    }
+    text += "prototype tiles:\n";
+    for (const LunarTileKey key : report.tiles) {
+        text += fmt::format("  {}\n", key.to_string());
     }
     const std::size_t listed_tiles = std::min<std::size_t>(
         report.expected_hierarchy_tiles.size(), 256U);

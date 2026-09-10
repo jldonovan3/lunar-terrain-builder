@@ -321,6 +321,18 @@ Result<std::uint8_t> choose_source_level(
         "source effective resolution requires a QSC level above tiles.max_level");
 }
 
+Result<bool> tile_intersects_source_footprint(
+    const LunarTileKey key,
+    const GeographicFootprint& footprint) {
+    if (!valid_footprint(footprint)) {
+        return failure<bool>(
+            ErrorCode::invalid_argument,
+            "tile/source intersection requires a valid geographic footprint",
+            key);
+    }
+    return tile_intersects_footprint(key, footprint);
+}
+
 Result<SparseHierarchyPlan> plan_sparse_hierarchy(
     const std::span<const HierarchySource> sources,
     const double reference_radius_meters) {

@@ -418,6 +418,19 @@ void append_domain(ByteVector& bytes, const std::string_view domain) {
     return "Replace";
 }
 
+[[nodiscard]] std::string_view quality_policy_name(
+    const RasterQualityPolicy policy) noexcept {
+    switch (policy) {
+        case RasterQualityPolicy::none:
+            return "None";
+        case RasterQualityPolicy::maskelyne_confidence_v1:
+            return "MaskelyneConfidence_v1";
+        case RasterQualityPolicy::lola_south_polar_v1:
+            return "LolaSouthPolar_v1";
+    }
+    return "None";
+}
+
 [[nodiscard]] Result<DatasetId> make_dataset_id(std::string_view key);
 
 [[nodiscard]] std::string canonical_raster_json(const RasterConfiguration& raster) {
@@ -474,12 +487,18 @@ void append_domain(ByteVector& bytes, const std::string_view domain) {
         json_string(raster.stable_key));
     if (raster.raster_files.size() > 1U || !raster.quality_mapping.empty() ||
         !raster.quality_members.empty() || !raster.unsupported_quality_values.empty()) {
+        const std::string quality_policy = raster.quality_policy == RasterQualityPolicy::none
+            ? std::string{}
+            : fmt::format(
+                ",\"quality_policy\":{}",
+                json_string(quality_policy_name(raster.quality_policy)));
         result.pop_back();
         result += fmt::format(
-            ",\"quality_mapping\":{},\"quality_members\":[{}],\"raster_files\":[{}],"
+            ",\"quality_mapping\":{},\"quality_members\":[{}]{},\"raster_files\":[{}],"
             "\"unsupported_quality_values\":[{}]}}",
             json_string(raster.quality_mapping),
             canonical_string_array_json(raster.quality_members),
+            quality_policy,
             canonical_raster_files_json(raster.raster_files),
             canonical_string_array_json(raster.unsupported_quality_values));
     }
@@ -526,6 +545,9 @@ void append_domain(ByteVector& bytes, const std::string_view domain) {
         }
         datasets += canonical_raster_json(*rasters[index].first);
     }
+    const std::string_view materialized_hierarchy = configuration.materialize_hierarchy
+        ? "\"materialize_hierarchy\":true,"
+        : "";
     std::string result = fmt::format(
         "{{\"algorithm_version\":1,\"apron\":{{\"algorithm\":"
         "\"quantized_neighbor_or_virtual_v1\",\"corner_algorithm\":"
@@ -548,8 +570,9 @@ void append_domain(ByteVector& bytes, const std::string_view domain) {
         "\"projection\":{{\"id\":1,\"version\":1}},\"quantization\":{{\"id\":1}},"
         "\"seam\":{{\"algorithm\":\"lowest_tile_key_patches_v1\","
         "\"quantization_order\":\"after_seam\"}},"
-        "\"tiles\":{{\"apron\":1,\"cells\":256,\"maximum_level\":{}}}}}",
+        "\"tiles\":{{\"apron\":1,\"cells\":256,{}\"maximum_level\":{}}}}}",
         datasets,
+        materialized_hierarchy,
         configuration.maximum_level);
     if (configuration.required_region) {
         result.pop_back();
@@ -705,7 +728,8 @@ void append_domain(ByteVector& bytes, const std::string_view domain) {
         validate_keys(*database.value(), {"name", "output_directory", "format_major", "format_minor"}, path, "database"),
         datum.value() == nullptr ? Result<void>::success() : validate_keys(*datum.value(), {"reference_radius_m", "elevation_origin_m", "elevation_step_m"}, path, "datum"),
         projection.value() == nullptr ? Result<void>::success() : validate_keys(*projection.value(), {"type", "version"}, path, "projection"),
-        tiles.value() == nullptr ? Result<void>::success() : validate_keys(*tiles.value(), {"cells", "apron", "max_level"}, path, "tiles"),
+        tiles.value() == nullptr ? Result<void>::success() : validate_keys(
+            *tiles.value(), {"cells", "apron", "max_level", "materialize_hierarchy"}, path, "tiles"),
         packaging.value() == nullptr ? Result<void>::success() : validate_keys(*packaging.value(), {"target_pack_bytes", "codec", "codec_level"}, path, "packaging"),
         synthetic.value() == nullptr ? Result<void>::success() : validate_keys(*synthetic.value(), {"stable_key", "source_uri", "amplitude_meters"}, path, "synthetic"),
         raster.value() == nullptr ? Result<void>::success() : validate_keys(
@@ -719,6 +743,7 @@ void append_domain(ByteVector& bytes, const std::string_view domain) {
              "source_no_data", "sample_scale", "sample_offset", "elevation_representation",
              "source_reference_radius_meters", "no_data_policy", "metadata_override", "priority",
              "role", "fusion_policy", "raster_files", "quality_mapping", "quality_members",
+             "quality_policy",
              "unsupported_quality_values", "source_root", "source_root_environment"},
             path,
             "raster"),
@@ -749,6 +774,8 @@ void append_domain(ByteVector& bytes, const std::string_view domain) {
     auto cells = optional_value<std::int64_t>(tiles.value(), "tiles", "cells", 256, path);
     auto apron = optional_value<std::int64_t>(tiles.value(), "tiles", "apron", 1, path);
     auto maximum_level = optional_value<std::int64_t>(tiles.value(), "tiles", "max_level", 0, path);
+    auto materialize_hierarchy = optional_value<bool>(
+        tiles.value(), "tiles", "materialize_hierarchy", false, path);
     auto target_pack_bytes = optional_value<std::int64_t>(
         packaging.value(), "packaging", "target_pack_bytes", 1'073'741'824LL, path);
     auto codec = optional_value<std::string>(packaging.value(), "packaging", "codec", "zstd", path);
@@ -786,7 +813,8 @@ void append_domain(ByteVector& bytes, const std::string_view domain) {
 
     if (!(name && output && major && minor && radius && origin && step && projection_type &&
           projection_version && cells && apron && maximum_level && target_pack_bytes && codec &&
-          codec_level && synthetic_key && synthetic_uri && amplitude && threads && cache)) {
+          codec_level && synthetic_key && synthetic_uri && amplitude && threads && cache &&
+          materialize_hierarchy)) {
         const Error* first_error = nullptr;
         const auto capture = [&first_error](const auto& value) {
             if (!value && first_error == nullptr) {
@@ -797,6 +825,7 @@ void append_domain(ByteVector& bytes, const std::string_view domain) {
         capture(step); capture(projection_type); capture(projection_version); capture(cells); capture(apron);
         capture(maximum_level); capture(target_pack_bytes); capture(codec); capture(codec_level);
         capture(synthetic_key); capture(synthetic_uri); capture(amplitude); capture(threads); capture(cache);
+        capture(materialize_hierarchy);
         return Result<BuilderConfiguration>::failure(*first_error);
     }
 
@@ -843,6 +872,7 @@ void append_domain(ByteVector& bytes, const std::string_view domain) {
     configuration.target_pack_bytes = static_cast<std::uint64_t>(target_pack_bytes.value());
     configuration.worker_threads = static_cast<std::uint32_t>(threads.value());
     configuration.maximum_level = static_cast<std::uint8_t>(maximum_level.value());
+    configuration.materialize_hierarchy = materialize_hierarchy.value();
     configuration.required_region = required_region;
 
     if (!is_raster) {
@@ -891,6 +921,8 @@ void append_domain(ByteVector& bytes, const std::string_view domain) {
     auto quality_mapping = optional_value<std::string>(
         raster.value(), "raster", "quality_mapping", "", path);
     auto quality_members = string_array(raster.value(), "raster", "quality_members", path);
+    auto quality_policy = optional_value<std::string>(
+        raster.value(), "raster", "quality_policy", "None", path);
     auto unsupported_quality_values = string_array(
         raster.value(), "raster", "unsupported_quality_values", path);
     auto resolution = required_value<double>(raster.value(), "raster", "nominal_resolution_meters", path);
@@ -916,7 +948,8 @@ void append_domain(ByteVector& bytes, const std::string_view domain) {
           label_member && expected_data_type && members && expected_width && expected_height && west && east && south &&
           north && resolution && effective_resolution && no_data && sample_scale && sample_offset && representation &&
           source_radius && no_data_policy && metadata_override && priority && role && fusion_policy &&
-          files && quality_mapping && quality_members && unsupported_quality_values)) {
+          files && quality_mapping && quality_members && quality_policy &&
+          unsupported_quality_values)) {
         const Error* first_error = nullptr;
         const auto capture = [&first_error](const auto& value) {
             if (!value && first_error == nullptr) {
@@ -931,6 +964,7 @@ void append_domain(ByteVector& bytes, const std::string_view domain) {
         capture(sample_scale); capture(sample_offset); capture(representation); capture(source_radius);
         capture(no_data_policy); capture(metadata_override); capture(priority); capture(role);
         capture(fusion_policy); capture(files); capture(quality_mapping); capture(quality_members);
+        capture(quality_policy);
         capture(unsupported_quality_values);
         return Result<BuilderConfiguration>::failure(*first_error);
     }
@@ -1064,6 +1098,20 @@ void append_domain(ByteVector& bytes, const std::string_view domain) {
                       "every raster.quality_members entry must appear in raster.artifact_members"),
         require_equal(quality_members.value().empty() || !quality_mapping.value().empty(), path,
                       "raster.quality_mapping is required when quality_members are declared"),
+        require_equal(
+            quality_policy.value() == "None" ||
+                quality_policy.value() == "MaskelyneConfidence_v1" ||
+                quality_policy.value() == "LolaSouthPolar_v1",
+            path,
+            "raster.quality_policy is not a supported v1 mapping"),
+        require_equal(
+            quality_policy.value() == "None" ||
+                (quality_policy.value() == "MaskelyneConfidence_v1" &&
+                 quality_members.value().size() == 1U) ||
+                (quality_policy.value() == "LolaSouthPolar_v1" &&
+                 quality_members.value().size() == 3U),
+            path,
+            "raster.quality_policy requires its exact companion-member count"),
         require_equal(!expected_data_type.value().empty() &&
                           expected_data_type.value().find('\0') == std::string::npos,
                       path, "raster.expected_data_type must be nonempty"),
@@ -1136,6 +1184,11 @@ void append_domain(ByteVector& bytes, const std::string_view domain) {
     raster_configuration.raster_files = std::move(files).value();
     raster_configuration.quality_mapping = std::move(quality_mapping).value();
     raster_configuration.quality_members = std::move(quality_members).value();
+    if (quality_policy.value() == "MaskelyneConfidence_v1") {
+        raster_configuration.quality_policy = RasterQualityPolicy::maskelyne_confidence_v1;
+    } else if (quality_policy.value() == "LolaSouthPolar_v1") {
+        raster_configuration.quality_policy = RasterQualityPolicy::lola_south_polar_v1;
+    }
     raster_configuration.unsupported_quality_values = std::move(unsupported_quality_values).value();
     raster_configuration.expected_bundle_bytes = bundle_bytes;
     raster_configuration.expected_bundle_sha256 = bundle_hash;

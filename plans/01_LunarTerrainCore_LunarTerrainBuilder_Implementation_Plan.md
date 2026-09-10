@@ -86,12 +86,12 @@ Acceptance: six complete synthetic QSC faces round-trip through writer and Core 
 ### M3 — SLDEM2015 P1 ingestion
 
 - Implement `IRasterSource`, GDAL-backed raster access, cataloging, datum/elevation normalization, no-data policy, metadata overrides, footprint extraction, and a coverage index.
-- Require stable dataset key and source URI separately from the local path. Hash the exact external SLDEM2015 subset and all required sidecars as one deterministic artifact bundle.
+- Require stable dataset key and source URI separately from the local path. Acquire and hash the complete locked 96-member SLDEM2015 full-set bundle as the single deterministic product identity; bound the P1 scientific case through the Builder region rather than a subset acquisition identity.
 - Validate that the active GDAL build exposes the needed JP2/OpenJPEG capability before accepting a JP2 source.
 - Convert radius-valued products to elevation relative to 1,737,400 m only through explicit configuration/metadata rules; silent datum or no-data assumptions are errors.
-- Keep generated GDAL rasters in ordinary CI. Run the hash-pinned SLDEM2015 subset as an opt-in acceptance preset because the source data remains outside git.
+- Keep generated GDAL rasters in ordinary CI. Run the hash-pinned SLDEM2015 full set with the former `0–30°N, 0–45°E` Builder region as an opt-in acceptance preset because the source data remains outside git.
 
-Acceptance: the pinned subset builds into `.ltdb/.ltp`, reconstructs through Core, and passes measured elevation, coverage, provenance, source-hash, and quantization spot checks.
+Acceptance: the regionally bounded build from the pinned full-set identity builds into `.ltdb/.ltp`, reconstructs through Core, and passes measured elevation, coverage, provenance, source-hash, and quantization spot checks.
 
 ### M4 — P2 seams, corners, quantization, and aprons
 
@@ -139,14 +139,14 @@ Acceptance: a complete configured build publishes validated `.ltdb/.ltp` outputs
 ### M8 — Real lunar DEM product qualification spike
 
 - Treat M0–M7 as controlled implementation gates; M8 is the first acceptance stage that fuses and benchmarks multiple independently provisioned real DEM products. Preserve the frozen golden vectors, generated-raster tests, synthetic hierarchy tests, and pinned single-source SLDEM2015 run.
-- Extend `provisioning/` with portable, resumable, verification-only-capable acquisition profiles and pinned artifact definitions. Keep all source bytes, derived rasters, databases, packs, caches, and staging output outside git.
+- Extend `provisioning/` with portable, resumable, verification-only-capable acquisition profiles and pinned artifact definitions. SLDEM2015 has one acquisition profile backed by the locked 96-member full-set identity; regional qualification is bounded only in Builder configuration. Keep all source bytes, derived rasters, databases, packs, caches, and staging output outside git.
 - Qualify a NASA/PDS-first stack consisting of a global LOLA coverage foundation, SLDEM2015 as the preferred ±60° backbone, a LROC NAC regional refinement, and a south-polar LOLA refinement with effective-resolution and quality companions. Base hierarchy levels on qualified effective resolution rather than advertised grid spacing.
-- Run required mid-latitude, SLDEM-coverage-boundary, and polar profiles through the complete Builder/Core/operator path. Compare applicable v1 fusion policies and verify scientific reconstruction, transitions, seams, sparse L7–L13 hierarchy, provenance, quality, deterministic source ordering, and incremental convergence.
+- Run required mid-latitude, SLDEM-coverage-boundary, and polar profiles through the complete Builder/Core/operator path. Compare applicable v1 fusion policies and verify scientific reconstruction, transitions, seams, sparse L7–L13 hierarchy, provenance, quality, deterministic source ordering, and incremental convergence. Alternative A governs changed-source acceptance: scientific content/provenance changes are source-influence-footprint-confined, frozen-v1 dependency/database/package changes may be global, and restoration converges exactly.
 - Benchmark the required profiles with the M7 metrics and complete one larger opt-in scale run using all 32 SLDEM2015 tiles, the qualified global foundation, and selected refinements. Do not silently change v1 semantics in response to benchmark results.
 - Classify each investigated product/policy as qualified, qualified with explicit limitations, rejected, or deferred. Treat any required format or algorithm-semantic revision as separately approved follow-up work.
 - Follow the detailed [`M8 Lunar DEM Product Qualification Spike`](03_M8_LunarDEMProductQualification.md) plan.
 
-Acceptance: hash-pinned real-data profiles for mid-latitude refinement, the SLDEM coverage boundary, and the south pole pass full structural/scientific validation, same-platform deterministic rebuilds, incremental-versus-clean equivalence, provenance/quality diagnostics, and operator workflows; the opt-in scale profile completes once with reproducible benchmark evidence and a final product/policy qualification record.
+Acceptance: hash-pinned real-data profiles for mid-latitude refinement, the SLDEM coverage boundary, and the south pole pass full structural/scientific validation, same-platform deterministic rebuilds, Alternative-A change/restoration checks, provenance/quality diagnostics, and operator workflows; the opt-in scale profile completes once with reproducible benchmark evidence and a final product/policy qualification record.
 
 ## Test Plan
 
@@ -173,5 +173,5 @@ Acceptance: hash-pinned real-data profiles for mid-latitude refinement, the SLDE
 - Core is hosted C++20 with allocation, RTTI, and threading available, but recoverable public failures do not require exceptions.
 - Core may depend on Zstd and OpenSSL; it must not depend on GDAL, PROJ, SQLite, TOML/CLI libraries, or Unreal.
 - `.ltbuild` is disposable; `.ltdb/.ltp` alone contain everything required to interpret the canonical database.
-- The P1 real-data artifact is an externally stored, SHA-256-pinned SLDEM2015 subset.
+- The P1 real-data input is the externally stored, SHA-256-pinned SLDEM2015 96-member full set, spatially bounded to the former P1 region by Builder configuration.
 - No Unreal Editor, Runtime, Mesh Terrain, World Partition, PCG, cooking, or engine asset work is included.

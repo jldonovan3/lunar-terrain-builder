@@ -8,7 +8,7 @@ The milestone summary and acceptance in [`01_LunarTerrainCore_LunarTerrainBuilde
 
 M8 begins only after M7 acceptance is complete. Its required qualification profiles use hash-pinned NASA/PDS-first products over representative mid-latitude, SLDEM-coverage-boundary, and polar regions. A larger opt-in scale profile then exercises the same pipeline with the complete 32-tile SLDEM2015 set, a global coverage source, and selected regional refinements.
 
-The portable acquisition foundation is already present before M8. [`provisioning/provision.py`](../provisioning/provision.py) is the single Python 3.9+ standard-library entry point for Windows and Linux, and [`provisioning/provisioning.json`](../provisioning/provisioning.json) is its schema-versioned product, bundle, and profile lock. The current `Artifact` and `Fullset` profiles preserve the established SLDEM2015 behavior and pinned three-member artifact identity. This completed tooling refactor does not begin M8; M8 extends the existing entry point and lock only after each additional product passes preflight.
+The portable acquisition foundation is already present before M8. [`provisioning/provision.py`](../provisioning/provision.py) is the single Python 3.9+ standard-library entry point for Windows and Linux, and [`provisioning/provisioning.json`](../provisioning/provisioning.json) is its schema-versioned product, bundle, and profile lock. The corrected acquisition contract uses one case-insensitive `SLDEM2015` profile and the existing locked 96-member `fullset` bundle as the product identity. Required-region builds remain spatially bounded by Builder configuration; they do not define smaller acquisition identities. This completed tooling refactor does not begin M8; M8 extends the existing entry point and lock only after each additional product passes preflight.
 
 ## Intended result
 
@@ -92,7 +92,7 @@ Every selected policy, priority, source order, declared metadata override, and q
 | Product | Purpose | Expected hierarchy | Required members and checks |
 |---|---|---:|---|
 | LOLA GDRDEM `LDEM_256` | Global coverage foundation and non-SLDEM fallback | Approximately L7 | Exact elevation tiles and detached labels; scaling/offset, radius/elevation meaning, global bounds, no-data/interpolation behavior, and official checksums must be pinned. |
-| SLDEM2015 512 ppd | Preferred ±60° backbone | Approximately L8 | Reuse the pinned `0–30°N, 0–45°E` artifact for the mid-latitude case; add exact northern-boundary members for the ±60° case; retain the existing full 32-tile provisioning mode for scale. Include the official data-quality product only after its alignment and semantics are qualified. |
+| SLDEM2015 512 ppd | Preferred ±60° backbone | Approximately L8 | Acquire and verify the complete locked 96-member `fullset` bundle through the single `SLDEM2015` profile for every use. Bound the mid-latitude and northern-boundary cases only through Builder regions. Include the official data-quality product only after its alignment and semantics are qualified. |
 | LROC NAC `MASKELYNE` DTM | First real high-resolution regional refinement | Approximately L12 | Pin the elevation DTM, confidence map, label/readme, and only the sidecars required to interpret them. Verify the published 5 m grid, 3.26–5.16°N by 33.53–33.92°E footprint, datum, no-data, confidence semantics, and error metadata. See the [official Maskelyne product](https://data.lroc.im-ldi.com/lroc/view_rdr/NAC_DTM_MASKELYNE). |
 | NASA GSFC south-polar LOLA adjusted DEM | Polar projection, coverage, effective resolution, and quality | Approximately L10 for the 20 m candidate, subject to effective resolution | Begin with the `80S` adjusted elevation, count, effective-resolution, and elevation-error GeoTIFFs; exclude hillshade, slope, and roughness products unless a later test requires them. Pin exact revisions and hashes during provisioning qualification. See the [official product listing](https://pgda.gsfc.nasa.gov/products/90). |
 
@@ -102,7 +102,7 @@ Expected levels are validation hypotheses. The M6 rule remains authoritative: ch
 
 The scale profile uses:
 
-- all 32 SLDEM2015 512-ppd elevation tiles and their 64 official sidecars already selected by the `Fullset` profile in `provisioning.json`;
+- all 32 SLDEM2015 512-ppd elevation tiles and their 64 official sidecars selected by the `SLDEM2015` profile's locked `fullset` bundle in `provisioning.json`;
 - the qualified global LOLA coverage foundation;
 - the qualified Maskelyne refinement; and
 - the qualified south-polar elevation and quality bundle.
@@ -227,8 +227,8 @@ Result: each required product has reviewable acquisition-lock fields, Builder me
 ### 2. Reproducible provisioning
 
 - Add the preflight-approved products, members, bundles, and acquisition profiles to `provisioning.json`; extend `provision.py` only for approved archive behavior the existing schema cannot express.
-- Reuse the existing SLDEM `Artifact` and `Fullset` profiles. Preserve the three-member artifact identity and the full-set member order, total-byte check, official PDS MD5 verification, and generated SHA-256 manifest.
-- During SLDEM scale preflight, lock the remaining full-set per-member byte counts and SHA-256 values and declare its canonical bundle identity without changing the existing three-member artifact definition.
+- Use only the `SLDEM2015` acquisition profile backed by the locked 96-member `fullset` bundle. Preserve its member order, total-byte check, official PDS MD5 verification, per-member SHA-256 values, canonical bundle identity, and generated SHA-256 manifest.
+- Use Builder `[region]` bounds for the former three-member and northern-boundary cases; do not create subset acquisition profiles or alternate SLDEM artifact identities.
 - Add network-free tests for every new schema rule and archive parser, then verify clean acquisition, interrupted/resumed acquisition, strict no-network reuse, corruption rejection, and upstream-revision rejection with the same CLI contract on Windows and Linux.
 - Document only portable `--root`, configured environment-variable, `--config`, and `--verify-only` contracts; keep source bytes and machine-local locations out of git.
 
@@ -249,7 +249,7 @@ Result: `scan`, `plan`, and diagnostic commands explain the source registry, cov
 - Run Profiles A–C through `scan`, `plan`, `build`, `validate --full`, `inspect`, `diff`, and relevant exports.
 - Build each profile twice from empty caches in the same pinned environment and compare database and pack hashes.
 - Repeat with the source declarations reversed; canonical source ordering and outputs must remain unchanged.
-- Remove and restore one refinement through configuration, then verify incremental invalidation and `diff` remain confined to its dependency footprint and that restoration converges with a clean build.
+- Remove and restore one refinement through configuration under Alternative A. Require scientific content and provenance changes to remain within the computed source-influence footprint; frozen-v1 dependency hashes, database identity, and package placement may change globally. Require restoration to converge exactly with a clean build.
 - Run the required profile on Windows/MSVC and Linux/GCC or Clang. Require deterministic repeats within each platform; record cross-platform hash comparison as a measured target under the existing project policy.
 
 Result: all required real-product combinations satisfy structural and scientific validation, or the qualification report rejects the product/policy with the failing evidence.
@@ -329,6 +329,7 @@ M8 is complete when all of the following hold:
 - Profiles A–C complete the full Builder/Core/operator flow and pass structural, scientific, seam, hierarchy, provenance, quality, publication, and deterministic-rebuild validation.
 - Each required pairing has an evidence-backed configured fusion policy and declared effective-resolution treatment; no product is accepted solely from visual output or advertised pixel spacing.
 - Same-platform clean repeats and reordered-source builds are byte-identical, and incremental builds converge with clean builds.
+- Alternative A is satisfied: content/provenance changes from a source change are footprint-confined, global frozen-v1 dependency/package changes are permitted, and restoration converges exactly.
 - The opt-in scale profile completes at least once and records the M7 operational metrics without silently changing v1 semantics.
 - The final qualification report identifies accepted products and policies, limitations, rejected/deferred candidates, actual L7–L13 coverage, source hashes, configuration identities, and follow-up work.
 
@@ -337,7 +338,7 @@ Failure of a candidate does not fail M8 when the bounded required terrain roles 
 ## Assumptions and locked defaults
 
 - M8 is a post-M7 spike; it does not begin while M5–M7 implementation or acceptance remains incomplete.
-- The portable Python provisioning foundation and locked SLDEM `Artifact`/`Fullset` profiles predate M8 and do not start the spike. M8 extends them only after product preflight; it does not restore platform-specific entry points.
+- The portable Python provisioning foundation and locked SLDEM full-set identity predate M8 and do not start the spike. M8 exposes it through the single `SLDEM2015` profile; it does not retain subset aliases or restore platform-specific entry points.
 - The required gate is the three representative real-data profiles. The larger scale profile is opt-in and must be run once, but is not an ordinary CI gate.
 - NASA/PDS and NASA GSFC products form the mandatory first source set. JAXA and CNSA candidates remain non-gating qualification opportunities.
 - LOLA supplies global coverage, SLDEM2015 is the preferred ±60° backbone, and qualified NAC/polar products supply sparse refinements.

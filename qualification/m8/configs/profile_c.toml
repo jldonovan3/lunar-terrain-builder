@@ -16,6 +16,7 @@ version = 1
 cells = 256
 apron = 1
 max_level = 12
+materialize_hierarchy = true
 
 [packaging]
 target_pack_bytes = 1073741824
@@ -119,5 +120,6 @@ role = "refinement"
 fusion_policy = "Replace"
 quality_mapping = "LDEC count 0 or non-finite elevation maps to QUAL filled-no-data/lower-confidence; local effective resolution above 80 m or elevation error above 5 m maps to QUAL lower-confidence."
 quality_members = ["LDEC_80S_20MPP_ADJ.TIF", "LDEM_80S_20MPP_ADJ_EFFRES.TIF", "LDEM_80S_20MPP_ADJ_ERR.TIF"]
+quality_policy = "LolaSouthPolar_v1"
 unsupported_quality_values = ["Exact shot count, continuous effective-resolution metres, and continuous elevation-error metres are recorded as source evidence but cannot be encoded losslessly in v1 QUAL."]
 source_root_environment = "LOLA_SOUTH_POLAR_80S_ROOT"

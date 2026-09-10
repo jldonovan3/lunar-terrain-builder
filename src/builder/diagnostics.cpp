@@ -483,7 +483,16 @@ Result<void> export_tile(
     const std::filesystem::path& database_path,
     const LunarTileKey key,
     const DiagnosticExportFormat format,
-    const std::filesystem::path& output_path) {
+    const std::filesystem::path& output_path,
+    const ExecutionOptions& options) {
+    if (options.telemetry != nullptr) {
+        options.telemetry->SetPhase("export");
+    }
+    auto execution = check_execution(options);
+    if (!execution) {
+        return execution;
+    }
+    TelemetryActivity export_activity{options.telemetry, "export"};
     auto database = LunarTerrainDatabase::Open(database_path);
     if (!database) {
         return Result<void>::failure(std::move(database).error());
@@ -526,8 +535,9 @@ Result<void> export_tile_diagnostic(
     const std::filesystem::path& database_path,
     const LunarTileKey key,
     const DiagnosticExportFormat format,
-    const std::filesystem::path& output_path) {
-    return export_tile(database_path, key, format, output_path);
+    const std::filesystem::path& output_path,
+    const ExecutionOptions& options) {
+    return export_tile(database_path, key, format, output_path, options);
 }
 
 }  // namespace lunar::terrain::builder

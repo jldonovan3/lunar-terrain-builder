@@ -3,6 +3,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <span>
+#include <stop_token>
 #include <vector>
 
 #include <lunar/terrain/result.hpp>
@@ -25,6 +26,7 @@ struct CanonicalPackRange {
 // single oversized tile is emitted alone.
 [[nodiscard]] Result<std::vector<CanonicalPackRange>> plan_canonical_pack_ranges(
     std::span<const PackingTile> sorted_tiles,
-    std::uint64_t target_pack_bytes);
+    std::uint64_t target_pack_bytes,
+    std::stop_token cancellation = {});
 
 }  // namespace lunar::terrain::builder

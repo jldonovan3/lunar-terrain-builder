@@ -3,6 +3,7 @@ import hashlib
 import io
 import json
 from pathlib import Path
+import stat
 import sys
 import tempfile
 import unittest
@@ -141,7 +142,7 @@ class ConfigTests(unittest.TestCase):
         repository = Path(__file__).resolve().parent.parent
         configs = sorted((repository / "qualification" / "m8" / "configs").glob("*.toml"))
         self.assertEqual(
-            10,
+            15,
             verify_builder_locks.verify(
                 Path(__file__).with_name("provisioning.json"), configs
             ),
@@ -168,6 +169,37 @@ class ConfigTests(unittest.TestCase):
 
 
 class VerificationTests(unittest.TestCase):
+    def test_matching_sha256_manifest_is_not_rewritten(self):
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory).resolve()
+            path = provision.write_sha256_manifest(
+                root,
+                "SHA256SUMS.txt",
+                {"tiles/b.bin": "bb", "tiles/a.bin": "aa"},
+            )
+            with mock.patch.object(provision.os, "replace") as replace:
+                repeated = provision.write_sha256_manifest(
+                    root,
+                    "SHA256SUMS.txt",
+                    {"tiles/b.bin": "bb", "tiles/a.bin": "aa"},
+                )
+            self.assertEqual(path, repeated)
+            replace.assert_not_called()
+
+    def test_making_members_read_only_is_idempotent(self):
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory).resolve()
+            path = root / "member.bin"
+            path.write_bytes(b"locked")
+            path.chmod(path.stat().st_mode & ~(
+                stat.S_IWUSR | stat.S_IWGRP | stat.S_IWOTH))
+            try:
+                with mock.patch.object(Path, "chmod") as chmod:
+                    provision.make_members_read_only(root, ("member.bin",))
+                chmod.assert_not_called()
+            finally:
+                path.chmod(path.stat().st_mode | stat.S_IWUSR)
+
     def test_verify_only_uses_existing_member_without_network(self):
         data = b"verified bytes"
         config, profile, relative_path = single_member_config(data)
@@ -226,6 +258,27 @@ class VerificationTests(unittest.TestCase):
 
 
 class DownloadTests(unittest.TestCase):
+    def test_copy_reports_periodic_byte_rate_progress(self):
+        response = FakeResponse(200, {"Content-Length": "4"}, [b"ab", b"cd"])
+        output = io.StringIO()
+        clock_value = [0.0]
+
+        def clock():
+            clock_value[0] += 1.0
+            return clock_value[0]
+
+        reporter = provision.ProgressReporter(0.5, output, clock)
+        reporter.begin("download", "tiles/example.bin", 4)
+        provision._copy_response(response, io.BytesIO(), 2, reporter)
+        reporter.finish()
+
+        text = output.getvalue()
+        self.assertIn("operation=download", text)
+        self.assertIn("member='tiles/example.bin'", text)
+        self.assertIn("state=running", text)
+        self.assertIn("bytes=4/4", text)
+        self.assertIn("rate_bytes_per_second=", text)
+
     def test_existing_partial_download_is_resumed_and_atomically_renamed(self):
         response = FakeResponse(
             206,

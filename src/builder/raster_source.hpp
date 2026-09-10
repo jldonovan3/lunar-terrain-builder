@@ -6,6 +6,7 @@
 #include <memory>
 #include <optional>
 #include <span>
+#include <stop_token>
 #include <string>
 #include <vector>
 
@@ -16,6 +17,7 @@
 #include <lunar/terrain/tile_key.hpp>
 
 #include "builder/configuration.hpp"
+#include "builder/telemetry.hpp"
 
 namespace lunar::terrain::builder {
 
@@ -49,6 +51,7 @@ struct RawTerrainSample {
     double elevation_meters{};
     bool interpolated{};
     bool filled_no_data{};
+    std::uint8_t quality_flags{};
 };
 
 struct RasterSourceDetails {
@@ -77,6 +80,9 @@ public:
     // still reported.
     [[nodiscard]] virtual Result<std::optional<RawTerrainSample>> TrySample(
         LunarGeodeticCoordinate coordinate) const;
+    [[nodiscard]] virtual Result<std::vector<std::optional<RawTerrainSample>>> SampleBatch(
+        std::span<const LunarGeodeticCoordinate> coordinates,
+        std::stop_token cancellation = {}) const;
     [[nodiscard]] virtual Result<Sha256Digest> WindowDependency(
         LunarTileKey key) const = 0;
 };
@@ -94,13 +100,24 @@ private:
     std::vector<const IRasterSource*> sources_;
 };
 
+struct PreparedSourceCatalog {
+    ConfigurationIdentity identity;
+    std::vector<std::unique_ptr<IRasterSource>> sources;
+};
+
+[[nodiscard]] Result<PreparedSourceCatalog> prepare_source_catalog(
+    const BuilderConfiguration& configuration,
+    TelemetryCollector* telemetry = nullptr);
+
 [[nodiscard]] Result<std::unique_ptr<IRasterSource>> open_raster_source(
     const BuilderConfiguration& configuration,
-    const ConfigurationIdentity& identity);
+    const ConfigurationIdentity& identity,
+    TelemetryCollector* telemetry = nullptr);
 
 [[nodiscard]] Result<std::vector<std::unique_ptr<IRasterSource>>> open_raster_sources(
     const BuilderConfiguration& configuration,
-    const ConfigurationIdentity& identity);
+    const ConfigurationIdentity& identity,
+    TelemetryCollector* telemetry = nullptr);
 
 [[nodiscard]] Result<LunarTileKey> choose_raster_prototype_tile(
     const IRasterSource& source,
